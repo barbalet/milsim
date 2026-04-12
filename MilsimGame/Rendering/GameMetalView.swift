@@ -143,10 +143,12 @@ final class InputController {
 
 final class TrackingMetalView: MTKView {
     private let inputController: InputController
+    private let onToggleMap: () -> Void
     private var mouseTrackingArea: NSTrackingArea?
 
-    init(device: MTLDevice, inputController: InputController) {
+    init(device: MTLDevice, inputController: InputController, onToggleMap: @escaping () -> Void) {
         self.inputController = inputController
+        self.onToggleMap = onToggleMap
         super.init(frame: .zero, device: device)
 
         colorPixelFormat = .bgra8Unorm
@@ -189,6 +191,10 @@ final class TrackingMetalView: MTKView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 46 {
+            onToggleMap()
+            return
+        }
         inputController.handleKeyDown(event.keyCode)
     }
 
@@ -239,7 +245,11 @@ struct MetalGameView: NSViewRepresentable {
             fatalError("Metal is required to run MilsimGame.")
         }
 
-        let view = TrackingMetalView(device: device, inputController: context.coordinator.inputController)
+        let view = TrackingMetalView(
+            device: device,
+            inputController: context.coordinator.inputController,
+            onToggleMap: context.coordinator.viewModel.toggleMap
+        )
         context.coordinator.renderer = GameRenderer(view: view, viewModel: viewModel, inputController: context.coordinator.inputController)
         view.delegate = context.coordinator.renderer
         return view

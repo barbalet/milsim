@@ -6,7 +6,7 @@
 - Metal for rendering
 - C for the gameplay and simulation core
 
-The current build is a playable Cycle 1 infantry sandbox slice: run four mission seeds, move through compounds and road networks, use stance and lean to manage exposure, switch fire modes, vault low cover, collect military gear, recover objective packages, and extract.
+The current build is a playable Cycle 2 terrain-and-interaction slice: run four mission seeds, move through terrain tiles and compounds, use stance and lean to manage exposure, switch fire modes, vault low cover, collect military gear, work gates/crates/radios/emplaced guns, recover objective packages, and extract.
 
 ## Controls
 
@@ -25,14 +25,18 @@ The current build is a playable Cycle 1 infantry sandbox slice: run four mission
 - `1`: primary weapon
 - `2`: sidearm
 - `3`: blade weapon
+- `M`: expand or collapse the tactical map
 - `Control` + `Command` + `F`: toggle full screen
 
-## Current Cycle 1 Features
+## Current Cycle 2 Features
 
 - Four mission seeds: cache raid, hostage recovery, recon-and-exfil, convoy ambush
-- Layered battlefield structures rendered in Metal: ridges, roads, compounds, low walls, towers, convoy hulks, and concealment foliage
+- Tiled terrain metadata in the C engine with materials, concealment, and movement costs
+- Layered battlefield structures rendered in Metal: ridges, roads, compounds, low walls, towers, convoy hulks, gates, and concealment foliage
+- Interactable gates, supply crates, dead drops, radios, and emplaced weapons
+- SwiftUI tactical map with grid references, compass heading, objective markers, and radio-gated hostile intel
 - C simulation support for stance, lean, vaulting, fire modes, muzzle velocity, recoil, suppressor mounting, and objective extraction
-- SwiftUI HUD support for mission briefs, posture, fire mode, inventory state, and operation cycling
+- SwiftUI HUD support for mission briefs, posture, fire mode, interaction hints, inventory state, and operation cycling
 
 ## Project Layout
 

@@ -27,6 +27,11 @@ struct MilsimGameApp: App {
                     viewModel.nextMission()
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+
+                Button("Toggle Tactical Map") {
+                    viewModel.toggleMap()
+                }
+                .keyboardShortcut("m", modifiers: [])
             }
         }
     }

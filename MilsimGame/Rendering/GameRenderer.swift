@@ -163,11 +163,39 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
     private func buildInstances(viewModel: GameViewModel, camera: SIMD2<Float>, worldViewport: SIMD2<Float>) -> [RenderInstance] {
         var instances: [RenderInstance] = []
-        instances.reserveCapacity(420)
+        instances.reserveCapacity(900)
 
         addTerrainBackdrop(to: &instances, camera: camera, worldViewport: worldViewport)
 
         viewModel.withState { statePointer in
+            let terrainTileCount = Int(game_terrain_tile_count(statePointer))
+            for index in 0..<terrainTileCount {
+                guard let tile = game_terrain_tile_at(statePointer, index)?.pointee else {
+                    continue
+                }
+
+                let position = SIMD2<Float>(tile.position.x, tile.position.y)
+                let size = SIMD2<Float>(tile.size.x - 4, tile.size.y - 4)
+                let tint = min(max(tile.height / 48.0, -0.18), 0.18)
+                var color = terrainColor(tile.material)
+                color.x = min(max(color.x + tint, 0), 1)
+                color.y = min(max(color.y + tint, 0), 1)
+                color.z = min(max(color.z + tint, 0), 1)
+
+                instances.append(makeInstance(position: position, size: size, color: color, rotation: 0, shape: .rectangle))
+                if tile.conceals {
+                    instances.append(
+                        makeInstance(
+                            position: position,
+                            size: size * SIMD2<Float>(0.42, 0.42),
+                            color: SIMD4<Float>(0.1, 0.2, 0.12, 0.18),
+                            rotation: 0,
+                            shape: .circle
+                        )
+                    )
+                }
+            }
+
             let structureCount = Int(game_structure_count(statePointer))
             for index in 0..<structureCount {
                 guard let structure = game_structure_at(statePointer, index)?.pointee else {
@@ -200,6 +228,38 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 case StructureKind_Convoy:
                     instances.append(makeInstance(position: position, size: size, color: SIMD4<Float>(0.28, 0.31, 0.27, 0.95), rotation: 0, shape: .rectangle))
                     instances.append(makeInstance(position: position, size: size * SIMD2<Float>(0.7, 0.52), color: SIMD4<Float>(0.14, 0.15, 0.14, 0.88), rotation: 0, shape: .rectangle))
+                case StructureKind_Door:
+                    instances.append(makeInstance(position: position, size: size, color: SIMD4<Float>(0.78, 0.72, 0.56, 0.55), rotation: rotation, shape: .rectangle))
+                default:
+                    break
+                }
+            }
+
+            let interactableCount = Int(game_interactable_count(statePointer))
+            for index in 0..<interactableCount {
+                guard let interactable = game_interactable_at(statePointer, index)?.pointee else {
+                    continue
+                }
+
+                let position = SIMD2<Float>(interactable.position.x, interactable.position.y)
+                let size = SIMD2<Float>(interactable.size.x, interactable.size.y)
+                let color = interactableColor(kind: interactable.kind, toggled: interactable.toggled, singleUse: interactable.singleUse)
+
+                switch interactable.kind {
+                case InteractableKind_Door:
+                    instances.append(makeInstance(position: position, size: size, color: color, rotation: interactable.rotation, shape: .rectangle))
+                case InteractableKind_SupplyCrate:
+                    instances.append(makeInstance(position: position, size: size, color: color, rotation: 0, shape: .rectangle))
+                    instances.append(makeInstance(position: position, size: size * SIMD2<Float>(0.24, 0.7), color: SIMD4<Float>(0.92, 0.93, 0.95, 0.85), rotation: 0, shape: .rectangle))
+                case InteractableKind_DeadDrop:
+                    instances.append(makeInstance(position: position, size: size, color: color, rotation: 0, shape: .circle))
+                    instances.append(makeInstance(position: position, size: size * 0.48, color: SIMD4<Float>(0.16, 0.16, 0.16, 0.44), rotation: 0, shape: .circle))
+                case InteractableKind_Radio:
+                    instances.append(makeInstance(position: position, size: size, color: color, rotation: 0, shape: .circle))
+                    instances.append(makeInstance(position: position + SIMD2<Float>(0, 16), size: SIMD2<Float>(6, 26), color: SIMD4<Float>(0.9, 0.95, 0.92, 0.84), rotation: 0, shape: .rectangle))
+                case InteractableKind_EmplacedWeapon:
+                    instances.append(makeInstance(position: position, size: size, color: color, rotation: 0.08, shape: .rectangle))
+                    instances.append(makeInstance(position: position + SIMD2<Float>(10, 0), size: SIMD2<Float>(size.x * 0.6, 6), color: SIMD4<Float>(0.18, 0.18, 0.18, 0.85), rotation: 0.08, shape: .rectangle))
                 default:
                     break
                 }
@@ -389,6 +449,42 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             return SIMD4<Float>(0.9, 0.52, 0.2, 1)
         default:
             return SIMD4<Float>(0.78, 0.8, 0.82, 1)
+        }
+    }
+
+    private func terrainColor(_ material: TerrainMaterial) -> SIMD4<Float> {
+        switch material {
+        case TerrainMaterial_Road:
+            return SIMD4<Float>(0.26, 0.27, 0.25, 0.96)
+        case TerrainMaterial_Mud:
+            return SIMD4<Float>(0.34, 0.22, 0.16, 0.96)
+        case TerrainMaterial_Rock:
+            return SIMD4<Float>(0.41, 0.37, 0.28, 0.96)
+        case TerrainMaterial_Compound:
+            return SIMD4<Float>(0.48, 0.43, 0.34, 0.94)
+        case TerrainMaterial_Forest:
+            return SIMD4<Float>(0.12, 0.28, 0.14, 0.96)
+        default:
+            return SIMD4<Float>(0.18, 0.27, 0.15, 0.96)
+        }
+    }
+
+    private func interactableColor(kind: InteractableKind, toggled: Bool, singleUse: Bool) -> SIMD4<Float> {
+        let spentFade: Float = (singleUse && toggled) ? 0.45 : 1.0
+
+        switch kind {
+        case InteractableKind_Door:
+            return SIMD4<Float>(0.81, 0.74, 0.58, toggled ? 0.32 : 0.9)
+        case InteractableKind_SupplyCrate:
+            return SIMD4<Float>(0.28, 0.58, 0.86, 0.92 * spentFade)
+        case InteractableKind_DeadDrop:
+            return SIMD4<Float>(0.92, 0.72, 0.24, 0.92 * spentFade)
+        case InteractableKind_Radio:
+            return SIMD4<Float>(0.34, 0.82, 0.46, 0.92 * spentFade)
+        case InteractableKind_EmplacedWeapon:
+            return SIMD4<Float>(0.76, 0.28, 0.22, 0.9)
+        default:
+            return SIMD4<Float>(0.8, 0.8, 0.8, 0.8)
         }
     }
 }

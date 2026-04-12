@@ -12,7 +12,8 @@ struct GameView: View {
                 hud: viewModel.hud,
                 onRestart: { viewModel.reset() },
                 onNextMission: { viewModel.nextMission() },
-                onToggleFullScreen: { NSApp.keyWindow?.toggleFullScreen(nil) }
+                onToggleFullScreen: { NSApp.keyWindow?.toggleFullScreen(nil) },
+                onToggleMap: { viewModel.toggleMap() }
             )
             .padding(22)
         }

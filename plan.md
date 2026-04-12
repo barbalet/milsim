@@ -28,14 +28,23 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Collectible bullets, rifles, pistols, blade weapons, suppressors, and magazines
 - Windowed play plus full-screen toggle support
 
-## Current Cycle 1 Status
+## Current Status
+
+### Cycle 1 Completed
 
 - Implemented four mission seeds: cache raid, hostage recovery, recon-and-exfil, and convoy ambush.
 - Replaced the flat arena feel with layered roads, ridges, buildings, low walls, convoy obstacles, and concealment foliage.
 - Expanded firearms with distinct recoil, muzzle velocity, suppressor compatibility, and selectable fire modes where supported.
 - Added infantry posture controls: crouch, prone, lean, and low-cover vaulting.
 - Updated the HUD and mission flow so operations can be restarted or advanced to the next seed directly in-app.
-- Remaining Cycle 1 work: deeper route variation inside each mission, more AI behaviors around compounds and search patterns, and stronger hit-reaction / suppression feedback.
+
+### Cycle 2 In Progress
+
+- Added a tiled terrain system with material-driven movement and concealment.
+- Added interactable gates, supply crates, dead drops, radios, and emplaced weapons across all mission seeds.
+- Added a SwiftUI tactical map with compass heading, grid references, objective markers, and radio-unlocked hostile markers.
+- The environment now contributes more to route choice and information gathering instead of serving as a flat combat board.
+- Remaining Cycle 2 work: externalize item/content data files, deepen terrain height/gameplay interaction, and build stronger navigation metadata for future AI routing.
 
 ## Cycle 0: Foundation and Playable Slice
 
@@ -118,8 +127,8 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Replace the flat arena with a height-aware terrain slice.
-- Move inventory/item templates into JSON or plist data files.
-- Add stance and recoil systems.
-- Add a tactical map and basic squad commands.
+- Move inventory/item templates and mission loot tables into JSON or plist data files.
+- Add terrain-aware routing hooks so future AI can read navigation costs and gates directly.
+- Expand map intelligence into radio reports, discovered markers, and squad command overlays.
 - Introduce mission scripting hooks and save/load support.
+- Begin Cycle 3 work on damage states, wound treatment, and fuller ballistic tradeoffs.

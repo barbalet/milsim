@@ -7,6 +7,7 @@
 static const float kWorldHalfWidth = 1400.0f;
 static const float kWorldHalfHeight = 980.0f;
 static const float kPickupRadius = 72.0f;
+static const float kInteractRadius = 88.0f;
 static const float kPlayerRadiusStand = 18.0f;
 static const float kPlayerRadiusCrouch = 15.0f;
 static const float kPlayerRadiusProne = 12.0f;
@@ -15,6 +16,16 @@ static const size_t kCollectionTarget = 8;
 static MissionType sMissionCursor = MissionType_CacheRaid;
 
 static float clampf(float value, float minimum, float maximum) {
+    if (value < minimum) {
+        return minimum;
+    }
+    if (value > maximum) {
+        return maximum;
+    }
+    return value;
+}
+
+static int clampi(int value, int minimum, int maximum) {
     if (value < minimum) {
         return minimum;
     }
@@ -133,6 +144,19 @@ static float player_radius(const Player *player) {
         case Stance_Stand:
         default:
             return kPlayerRadiusStand;
+    }
+}
+
+static float default_weapon_range(WeaponClass weaponClass, float muzzleVelocity) {
+    switch (weaponClass) {
+        case WeaponClass_Pistol:
+            return 520.0f;
+        case WeaponClass_Knife:
+            return 70.0f;
+        case WeaponClass_Rifle:
+        case WeaponClass_Carbine:
+        default:
+            return muzzleVelocity > 1.0f ? muzzleVelocity * 0.82f : 820.0f;
     }
 }
 
@@ -270,6 +294,222 @@ static void add_world_item(GameState *state, WorldItem item) {
     }
 }
 
+static float terrain_tile_width(void) {
+    return (kWorldHalfWidth * 2.0f) / (float) GAME_TERRAIN_COLUMNS;
+}
+
+static float terrain_tile_height(void) {
+    return (kWorldHalfHeight * 2.0f) / (float) GAME_TERRAIN_ROWS;
+}
+
+static size_t terrain_tile_index(int column, int row) {
+    return (size_t) row * (size_t) GAME_TERRAIN_COLUMNS + (size_t) column;
+}
+
+static float terrain_navigation_cost(TerrainMaterial material) {
+    switch (material) {
+        case TerrainMaterial_Road:
+            return 0.84f;
+        case TerrainMaterial_Mud:
+            return 1.28f;
+        case TerrainMaterial_Rock:
+            return 1.08f;
+        case TerrainMaterial_Compound:
+            return 0.95f;
+        case TerrainMaterial_Forest:
+            return 1.18f;
+        case TerrainMaterial_Grass:
+        default:
+            return 1.0f;
+    }
+}
+
+static bool terrain_conceals(TerrainMaterial material) {
+    return material == TerrainMaterial_Forest;
+}
+
+static void initialize_terrain(GameState *state, MissionType missionType) {
+    float width = terrain_tile_width();
+    float height = terrain_tile_height();
+    int row;
+    int column;
+
+    for (row = 0; row < GAME_TERRAIN_ROWS; row += 1) {
+        for (column = 0; column < GAME_TERRAIN_COLUMNS; column += 1) {
+            TerrainTile *tile = &state->terrainTiles[terrain_tile_index(column, row)];
+            float undulation = sinf((float) column * 0.72f + (float) missionType * 0.33f) * 16.0f;
+            undulation += cosf((float) row * 0.58f - (float) missionType * 0.27f) * 12.0f;
+
+            memset(tile, 0, sizeof(*tile));
+            tile->active = true;
+            tile->position = vec2_make(-kWorldHalfWidth + width * ((float) column + 0.5f),
+                                       -kWorldHalfHeight + height * ((float) row + 0.5f));
+            tile->size = vec2_make(width, height);
+            tile->height = undulation;
+            tile->material = TerrainMaterial_Grass;
+            tile->navigationCost = terrain_navigation_cost(tile->material);
+            tile->conceals = terrain_conceals(tile->material);
+        }
+    }
+}
+
+static void paint_terrain_rect(GameState *state,
+                               Vec2 position,
+                               Vec2 size,
+                               TerrainMaterial material,
+                               float heightOffset,
+                               bool forceConcealment) {
+    int row;
+    int column;
+    float left = position.x - size.x * 0.5f;
+    float right = position.x + size.x * 0.5f;
+    float bottom = position.y - size.y * 0.5f;
+    float top = position.y + size.y * 0.5f;
+
+    for (row = 0; row < GAME_TERRAIN_ROWS; row += 1) {
+        for (column = 0; column < GAME_TERRAIN_COLUMNS; column += 1) {
+            TerrainTile *tile = &state->terrainTiles[terrain_tile_index(column, row)];
+            float tileLeft = tile->position.x - tile->size.x * 0.5f;
+            float tileRight = tile->position.x + tile->size.x * 0.5f;
+            float tileBottom = tile->position.y - tile->size.y * 0.5f;
+            float tileTop = tile->position.y + tile->size.y * 0.5f;
+
+            if (tileRight < left || tileLeft > right || tileTop < bottom || tileBottom > top) {
+                continue;
+            }
+
+            tile->material = material;
+            tile->navigationCost = terrain_navigation_cost(material);
+            tile->height += heightOffset;
+            tile->conceals = forceConcealment || terrain_conceals(material);
+        }
+    }
+}
+
+static const TerrainTile *terrain_tile_at_position(const GameState *state, Vec2 position) {
+    int column;
+    int row;
+
+    if (position.x < -kWorldHalfWidth || position.x > kWorldHalfWidth ||
+        position.y < -kWorldHalfHeight || position.y > kWorldHalfHeight) {
+        return NULL;
+    }
+
+    column = clampi((int) floorf(((position.x + kWorldHalfWidth) / (kWorldHalfWidth * 2.0f)) * (float) GAME_TERRAIN_COLUMNS),
+                    0,
+                    GAME_TERRAIN_COLUMNS - 1);
+    row = clampi((int) floorf(((position.y + kWorldHalfHeight) / (kWorldHalfHeight * 2.0f)) * (float) GAME_TERRAIN_ROWS),
+                 0,
+                 GAME_TERRAIN_ROWS - 1);
+
+    return &state->terrainTiles[terrain_tile_index(column, row)];
+}
+
+static float terrain_height_at_position(const GameState *state, Vec2 position) {
+    const TerrainTile *tile = terrain_tile_at_position(state, position);
+    if (tile == NULL) {
+        return 0.0f;
+    }
+    return tile->height;
+}
+
+static int add_structure(GameState *state,
+                         StructureKind kind,
+                         Vec2 position,
+                         Vec2 size,
+                         float rotation,
+                         bool blocksMovement,
+                         bool blocksProjectiles,
+                         bool vaultable,
+                         bool conceals) {
+    size_t index;
+    for (index = 0; index < GAME_MAX_STRUCTURES; index += 1) {
+        if (!state->structures[index].active) {
+            Structure *structure = &state->structures[index];
+            structure->active = true;
+            structure->kind = kind;
+            structure->position = position;
+            structure->size = size;
+            structure->rotation = rotation;
+            structure->blocksMovement = blocksMovement;
+            structure->blocksProjectiles = blocksProjectiles;
+            structure->vaultable = vaultable;
+            structure->conceals = conceals;
+
+            switch (kind) {
+                case StructureKind_Road:
+                    paint_terrain_rect(state, position, vec2_make(size.x + 40.0f, size.y + 20.0f), TerrainMaterial_Road, -4.0f, false);
+                    break;
+                case StructureKind_Ridge:
+                    paint_terrain_rect(state, position, vec2_make(size.x + 30.0f, size.y + 30.0f), TerrainMaterial_Rock, 18.0f, false);
+                    break;
+                case StructureKind_TreeCluster:
+                    paint_terrain_rect(state, position, vec2_make(size.x + 50.0f, size.y + 50.0f), TerrainMaterial_Forest, 6.0f, true);
+                    break;
+                case StructureKind_Building:
+                case StructureKind_LowWall:
+                case StructureKind_Tower:
+                case StructureKind_Convoy:
+                    paint_terrain_rect(state, position, vec2_make(size.x + 24.0f, size.y + 24.0f), TerrainMaterial_Compound, 4.0f, false);
+                    break;
+                case StructureKind_Door:
+                case StructureKind_None:
+                default:
+                    break;
+            }
+
+            return (int) index;
+        }
+    }
+
+    return -1;
+}
+
+static int add_interactable(GameState *state,
+                            InteractableKind kind,
+                            Vec2 position,
+                            Vec2 size,
+                            float rotation,
+                            int linkedStructureIndex,
+                            bool toggled,
+                            bool singleUse,
+                            float cooldown,
+                            int ammo556,
+                            int ammo9mm,
+                            int healthValue,
+                            const char *name) {
+    size_t index;
+    for (index = 0; index < GAME_MAX_INTERACTABLES; index += 1) {
+        if (!state->interactables[index].active) {
+            Interactable *interactable = &state->interactables[index];
+            memset(interactable, 0, sizeof(*interactable));
+            interactable->active = true;
+            interactable->kind = kind;
+            interactable->position = position;
+            interactable->size = size;
+            interactable->rotation = rotation;
+            interactable->linkedStructureIndex = linkedStructureIndex;
+            interactable->toggled = toggled;
+            interactable->singleUse = singleUse;
+            interactable->cooldown = cooldown;
+            interactable->ammo556 = ammo556;
+            interactable->ammo9mm = ammo9mm;
+            interactable->healthValue = healthValue;
+            copy_name(interactable->name, sizeof(interactable->name), name);
+            return (int) index;
+        }
+    }
+
+    return -1;
+}
+
+static int add_gate(GameState *state, Vec2 position, bool vertical, const char *name) {
+    Vec2 size = vertical ? vec2_make(18.0f, 72.0f) : vec2_make(72.0f, 18.0f);
+    int structureIndex = add_structure(state, StructureKind_Door, position, size, 0.0f, true, true, false, false);
+    add_interactable(state, InteractableKind_Door, position, size, 0.0f, structureIndex, false, false, 0.0f, 0, 0, 0, name);
+    return structureIndex;
+}
+
 static void add_enemy(GameState *state, Vec2 position, float patrolPhase) {
     size_t index;
     for (index = 0; index < GAME_MAX_ENEMIES; index += 1) {
@@ -281,32 +521,6 @@ static void add_enemy(GameState *state, Vec2 position, float patrolPhase) {
             state->enemies[index].fireCooldown = 0.25f + (float) index * 0.07f;
             state->enemies[index].patrolPhase = patrolPhase;
             state->enemies[index].hitTimer = 0.0f;
-            return;
-        }
-    }
-}
-
-static void add_structure(GameState *state,
-                          StructureKind kind,
-                          Vec2 position,
-                          Vec2 size,
-                          float rotation,
-                          bool blocksMovement,
-                          bool blocksProjectiles,
-                          bool vaultable,
-                          bool conceals) {
-    size_t index;
-    for (index = 0; index < GAME_MAX_STRUCTURES; index += 1) {
-        if (!state->structures[index].active) {
-            state->structures[index].active = true;
-            state->structures[index].kind = kind;
-            state->structures[index].position = position;
-            state->structures[index].size = size;
-            state->structures[index].rotation = rotation;
-            state->structures[index].blocksMovement = blocksMovement;
-            state->structures[index].blocksProjectiles = blocksProjectiles;
-            state->structures[index].vaultable = vaultable;
-            state->structures[index].conceals = conceals;
             return;
         }
     }
@@ -359,6 +573,12 @@ static bool projectile_inside_cover(const GameState *state, Vec2 position) {
 
 static bool player_in_concealment(const GameState *state) {
     size_t index;
+    const TerrainTile *tile = terrain_tile_at_position(state, state->player.position);
+
+    if (tile != NULL && tile->conceals) {
+        return true;
+    }
+
     for (index = 0; index < GAME_MAX_STRUCTURES; index += 1) {
         const Structure *structure = &state->structures[index];
         if (structure->active && structure->conceals &&
@@ -366,34 +586,19 @@ static bool player_in_concealment(const GameState *state) {
             return true;
         }
     }
+
     return false;
 }
 
 static float terrain_speed_multiplier(const GameState *state, Vec2 position) {
+    const TerrainTile *tile = terrain_tile_at_position(state, position);
     float multiplier = 1.0f;
-    size_t index;
-    for (index = 0; index < GAME_MAX_STRUCTURES; index += 1) {
-        const Structure *structure = &state->structures[index];
-        if (!structure->active || !position_inside_structure(structure, position, 4.0f)) {
-            continue;
-        }
 
-        switch (structure->kind) {
-            case StructureKind_Road:
-                multiplier *= 1.08f;
-                break;
-            case StructureKind_TreeCluster:
-                multiplier *= 0.82f;
-                break;
-            case StructureKind_Ridge:
-                multiplier *= 0.92f;
-                break;
-            default:
-                break;
-        }
+    if (tile != NULL) {
+        multiplier *= 1.0f / clampf(tile->navigationCost, 0.7f, 1.5f);
     }
 
-    return clampf(multiplier, 0.65f, 1.15f);
+    return clampf(multiplier, 0.62f, 1.2f);
 }
 
 static void clamp_player_to_world(Player *player) {
@@ -535,7 +740,7 @@ static void collect_world_item(GameState *state, size_t index) {
                                              worldItem->magazineCapacity,
                                              worldItem->roundsInMagazine,
                                              worldItem->damage,
-                                             (worldItem->weaponClass == WeaponClass_Knife) ? 70.0f : 820.0f,
+                                             default_weapon_range(worldItem->weaponClass, worldItem->muzzleVelocity),
                                              worldItem->suppressed,
                                              worldItem->recoil,
                                              worldItem->muzzleVelocity,
@@ -571,29 +776,211 @@ static void collect_world_item(GameState *state, size_t index) {
     worldItem->active = false;
 }
 
-static void collect_nearby_item(GameState *state) {
+static void sync_door_structure(GameState *state, const Interactable *interactable) {
+    if (interactable->linkedStructureIndex < 0 || interactable->linkedStructureIndex >= GAME_MAX_STRUCTURES) {
+        return;
+    }
+
+    state->structures[interactable->linkedStructureIndex].blocksMovement = !interactable->toggled;
+    state->structures[interactable->linkedStructureIndex].blocksProjectiles = !interactable->toggled;
+}
+
+static bool interactable_is_spent(const Interactable *interactable) {
+    return interactable->singleUse && interactable->toggled;
+}
+
+static void interact_with_supply_crate(GameState *state, Interactable *interactable) {
+    char buffer[GAME_EVENT_LENGTH];
+
+    if (interactable_is_spent(interactable)) {
+        set_event(state, "Supply crate is already stripped.");
+        return;
+    }
+    if (interactable->cooldown > 0.0f) {
+        set_event(state, "Supply crate is not ready to access again.");
+        return;
+    }
+
+    state->player.ammo556 += interactable->ammo556;
+    state->player.ammo9mm += interactable->ammo9mm;
+    state->player.health = clampf(state->player.health + (float) interactable->healthValue, 0.0f, 100.0f);
+    state->collectedItemCount += 1;
+
+    snprintf(buffer,
+             sizeof(buffer),
+             "Resupplied from %s: +%d 5.56, +%d 9mm, +%d health.",
+             interactable->name,
+             interactable->ammo556,
+             interactable->ammo9mm,
+             interactable->healthValue);
+    set_event(state, buffer);
+
+    if (interactable->singleUse) {
+        interactable->toggled = true;
+    } else {
+        interactable->cooldown = 12.0f;
+    }
+}
+
+static void interact_with_dead_drop(GameState *state, Interactable *interactable) {
+    char buffer[GAME_EVENT_LENGTH];
+
+    if (interactable_is_spent(interactable)) {
+        set_event(state, "Dead drop already recovered.");
+        return;
+    }
+
+    state->player.ammo556 += interactable->ammo556;
+    state->player.ammo9mm += interactable->ammo9mm;
+    state->player.health = clampf(state->player.health + (float) interactable->healthValue, 0.0f, 100.0f);
+    state->collectedItemCount += 1;
+    interactable->toggled = true;
+
+    snprintf(buffer, sizeof(buffer), "Recovered %s from the dead drop.", interactable->name);
+    set_event(state, buffer);
+}
+
+static void interact_with_radio(GameState *state, Interactable *interactable) {
+    if (interactable_is_spent(interactable) || state->radioIntelUnlocked) {
+        set_event(state, "Radio intercept is already copied.");
+        interactable->toggled = true;
+        return;
+    }
+
+    state->radioIntelUnlocked = true;
+    interactable->toggled = true;
+    state->collectedItemCount += 1;
+    set_event(state, "Radio intercept decoded. Hostile positions marked on the tactical map.");
+}
+
+static Enemy *nearest_enemy_to_position(GameState *state, Vec2 position, float maxDistance) {
     size_t index;
-    float closestDistance = kPickupRadius;
-    size_t closestIndex = GAME_MAX_ITEMS;
-    for (index = 0; index < GAME_MAX_ITEMS; index += 1) {
-        if (!state->worldItems[index].active) {
+    float closestDistance = maxDistance;
+    Enemy *closestEnemy = NULL;
+
+    for (index = 0; index < GAME_MAX_ENEMIES; index += 1) {
+        Enemy *enemy = &state->enemies[index];
+        float distance;
+
+        if (!enemy->active) {
             continue;
         }
 
-        if (state->worldItems[index].kind == ItemKind_Objective) {
-            closestDistance = kPickupRadius + 18.0f;
-        }
-
-        if (vec2_distance(state->player.position, state->worldItems[index].position) < closestDistance) {
-            closestDistance = vec2_distance(state->player.position, state->worldItems[index].position);
-            closestIndex = index;
+        distance = vec2_distance(position, enemy->position);
+        if (distance < closestDistance) {
+            closestDistance = distance;
+            closestEnemy = enemy;
         }
     }
 
-    if (closestIndex < GAME_MAX_ITEMS) {
-        collect_world_item(state, closestIndex);
+    return closestEnemy;
+}
+
+static void interact_with_emplaced_weapon(GameState *state, Interactable *interactable) {
+    Enemy *enemy;
+    Vec2 direction;
+
+    if (interactable->cooldown > 0.0f) {
+        set_event(state, "Emplaced weapon is still settling from the last burst.");
+        return;
+    }
+
+    enemy = nearest_enemy_to_position(state, interactable->position, 620.0f);
+    if (enemy == NULL) {
+        set_event(state, "No hostile in arc for the emplaced weapon.");
+        return;
+    }
+
+    direction = vec2_normalize(vec2_sub(enemy->position, interactable->position));
+    spawn_projectile(state, interactable->position, vec2_rotate(direction, -0.025f), 1180.0f, 28.0f, true);
+    spawn_projectile(state, interactable->position, direction, 1220.0f, 30.0f, true);
+    spawn_projectile(state, interactable->position, vec2_rotate(direction, 0.025f), 1180.0f, 28.0f, true);
+    interactable->cooldown = 4.0f;
+    state->player.noiseTimer = 1.9f;
+    set_event(state, "Emplaced weapon stitched rounds across the patrol.");
+}
+
+static void interact_with_interactable(GameState *state, size_t index) {
+    Interactable *interactable = &state->interactables[index];
+    char buffer[GAME_EVENT_LENGTH];
+
+    if (!interactable->active) {
+        return;
+    }
+
+    switch (interactable->kind) {
+        case InteractableKind_Door:
+            if (interactable->cooldown > 0.0f) {
+                return;
+            }
+            interactable->toggled = !interactable->toggled;
+            interactable->cooldown = 0.2f;
+            sync_door_structure(state, interactable);
+            snprintf(buffer, sizeof(buffer), "%s %s.", interactable->name, interactable->toggled ? "opened" : "closed");
+            set_event(state, buffer);
+            break;
+        case InteractableKind_SupplyCrate:
+            interact_with_supply_crate(state, interactable);
+            break;
+        case InteractableKind_DeadDrop:
+            interact_with_dead_drop(state, interactable);
+            break;
+        case InteractableKind_Radio:
+            interact_with_radio(state, interactable);
+            break;
+        case InteractableKind_EmplacedWeapon:
+            interact_with_emplaced_weapon(state, interactable);
+            break;
+        case InteractableKind_None:
+        default:
+            break;
+    }
+}
+
+static void interact_nearby(GameState *state) {
+    size_t worldIndex;
+    size_t interactableIndex;
+    size_t closestWorldIndex = GAME_MAX_ITEMS;
+    size_t closestInteractableIndex = GAME_MAX_INTERACTABLES;
+    float closestWorldDistance = kPickupRadius;
+    float closestInteractableDistance = kInteractRadius;
+
+    for (worldIndex = 0; worldIndex < GAME_MAX_ITEMS; worldIndex += 1) {
+        float maxDistance;
+        float distance;
+
+        if (!state->worldItems[worldIndex].active) {
+            continue;
+        }
+
+        maxDistance = (state->worldItems[worldIndex].kind == ItemKind_Objective) ? (kPickupRadius + 18.0f) : kPickupRadius;
+        distance = vec2_distance(state->player.position, state->worldItems[worldIndex].position);
+        if (distance < maxDistance && distance < closestWorldDistance) {
+            closestWorldDistance = distance;
+            closestWorldIndex = worldIndex;
+        }
+    }
+
+    for (interactableIndex = 0; interactableIndex < GAME_MAX_INTERACTABLES; interactableIndex += 1) {
+        float distance;
+        if (!state->interactables[interactableIndex].active) {
+            continue;
+        }
+
+        distance = vec2_distance(state->player.position, state->interactables[interactableIndex].position);
+        if (distance < closestInteractableDistance) {
+            closestInteractableDistance = distance;
+            closestInteractableIndex = interactableIndex;
+        }
+    }
+
+    if (closestInteractableIndex < GAME_MAX_INTERACTABLES &&
+        (closestWorldIndex >= GAME_MAX_ITEMS || closestInteractableDistance <= closestWorldDistance + 6.0f)) {
+        interact_with_interactable(state, closestInteractableIndex);
+    } else if (closestWorldIndex < GAME_MAX_ITEMS) {
+        collect_world_item(state, closestWorldIndex);
     } else {
-        set_event(state, "No field item close enough to recover.");
+        set_event(state, "No field item or interactable close enough.");
     }
 }
 
@@ -909,9 +1296,21 @@ static void update_projectiles(GameState *state, float dt) {
     }
 }
 
+static void update_interactables(GameState *state, float dt) {
+    size_t index;
+    for (index = 0; index < GAME_MAX_INTERACTABLES; index += 1) {
+        Interactable *interactable = &state->interactables[index];
+        if (!interactable->active) {
+            continue;
+        }
+        interactable->cooldown = clampf(interactable->cooldown - dt, 0.0f, 600.0f);
+    }
+}
+
 static void update_enemies(GameState *state, float dt) {
     size_t index;
     float detectionRange = 490.0f;
+    float playerHeight = terrain_height_at_position(state, state->player.position);
 
     if (state->player.stance == Stance_Crouch) {
         detectionRange *= 0.8f;
@@ -930,20 +1329,28 @@ static void update_enemies(GameState *state, float dt) {
         Vec2 toPlayer;
         float distanceToPlayer;
         Vec2 moveDirection;
+        float enemyDetectionRange = detectionRange;
+        float enemyHeight;
 
         if (!enemy->active) {
             continue;
+        }
+
+        enemyHeight = terrain_height_at_position(state, enemy->position);
+        if (playerHeight > enemyHeight + 8.0f) {
+            enemyDetectionRange *= 1.08f;
         }
 
         enemy->hitTimer = clampf(enemy->hitTimer - dt, 0.0f, 10.0f);
         toPlayer = vec2_sub(state->player.position, enemy->position);
         distanceToPlayer = vec2_length(toPlayer);
 
-        if (distanceToPlayer < detectionRange) {
+        if (distanceToPlayer < enemyDetectionRange) {
             moveDirection = vec2_normalize(toPlayer);
 
             if (distanceToPlayer > 170.0f) {
-                enemy->velocity = vec2_scale(moveDirection, 92.0f);
+                float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
+                enemy->velocity = vec2_scale(moveDirection, 92.0f * terrainMultiplier);
                 attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, dt)));
             } else {
                 enemy->velocity = vec2_make(0.0f, 0.0f);
@@ -972,8 +1379,9 @@ static void update_enemies(GameState *state, float dt) {
             }
         } else {
             float patrolAngle = state->missionTime * 0.28f + enemy->patrolPhase;
+            float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
             enemy->velocity = vec2_make(cosf(patrolAngle), sinf(patrolAngle * 1.18f));
-            attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, 34.0f * dt)));
+            attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, 34.0f * terrainMultiplier * dt)));
         }
     }
 }
@@ -1052,18 +1460,23 @@ static void setup_common_player(GameState *state, Vec2 startPosition) {
 
 static void setup_cache_raid(GameState *state) {
     copy_name(state->missionName, sizeof(state->missionName), "Cache Raid");
-    copy_name(state->missionBrief, sizeof(state->missionBrief), "Ridge approach. Hit the northern cache compound, recover the ledger and firing codes, then extract east.");
+    copy_name(state->missionBrief, sizeof(state->missionBrief), "Ridge approach. Breach the northern gate, strip the cache compound, tap the relay if time allows, and extract east.");
     state->objectiveTarget = 2;
     state->extractionZone = vec2_make(1050.0f, 640.0f);
     state->extractionRadius = 100.0f;
     setup_common_player(state, vec2_make(-1120.0f, -620.0f));
+
+    paint_terrain_rect(state, vec2_make(-980.0f, -620.0f), vec2_make(360.0f, 280.0f), TerrainMaterial_Forest, 4.0f, true);
+    paint_terrain_rect(state, vec2_make(520.0f, 220.0f), vec2_make(420.0f, 320.0f), TerrainMaterial_Compound, 8.0f, false);
 
     add_structure(state, StructureKind_Road, vec2_make(-180.0f, -250.0f), vec2_make(1240.0f, 76.0f), 0.06f, false, false, false, false);
     add_structure(state, StructureKind_Ridge, vec2_make(-380.0f, -40.0f), vec2_make(340.0f, 160.0f), -0.12f, true, true, false, false);
     add_structure(state, StructureKind_TreeCluster, vec2_make(-720.0f, -300.0f), vec2_make(210.0f, 190.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_TreeCluster, vec2_make(30.0f, 120.0f), vec2_make(180.0f, 160.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_Building, vec2_make(520.0f, 180.0f), vec2_make(260.0f, 180.0f), 0.0f, true, true, false, false);
-    add_structure(state, StructureKind_LowWall, vec2_make(520.0f, 320.0f), vec2_make(320.0f, 24.0f), 0.0f, true, true, true, false);
+    add_structure(state, StructureKind_LowWall, vec2_make(430.0f, 320.0f), vec2_make(120.0f, 24.0f), 0.0f, true, true, true, false);
+    add_structure(state, StructureKind_LowWall, vec2_make(610.0f, 320.0f), vec2_make(120.0f, 24.0f), 0.0f, true, true, true, false);
+    add_gate(state, vec2_make(520.0f, 320.0f), false, "North gate");
     add_structure(state, StructureKind_LowWall, vec2_make(360.0f, 180.0f), vec2_make(24.0f, 220.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_LowWall, vec2_make(680.0f, 180.0f), vec2_make(24.0f, 220.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_Tower, vec2_make(860.0f, 460.0f), vec2_make(80.0f, 80.0f), 0.0f, true, true, false, false);
@@ -1090,6 +1503,11 @@ static void setup_cache_raid(GameState *state) {
                                             true));
     add_world_item(state, make_world_supply("Combat Gauze", ItemKind_Medkit, AmmoType_None, vec2_make(960.0f, 420.0f), 1, 0, false));
 
+    add_interactable(state, InteractableKind_SupplyCrate, vec2_make(-900.0f, -430.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 60, 17, 10, "Landing zone crate");
+    add_interactable(state, InteractableKind_DeadDrop, vec2_make(40.0f, 140.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 30, 0, 0, "hide-site satchel");
+    add_interactable(state, InteractableKind_Radio, vec2_make(860.0f, 520.0f), vec2_make(34.0f, 34.0f), 0.0f, -1, false, true, 0.0f, 0, 0, 0, "relay radio");
+    add_interactable(state, InteractableKind_EmplacedWeapon, vec2_make(790.0f, 430.0f), vec2_make(42.0f, 28.0f), 0.0f, -1, false, false, 0.0f, 0, 0, 0, "watchtower MG");
+
     add_enemy(state, vec2_make(-180.0f, -120.0f), 0.2f);
     add_enemy(state, vec2_make(260.0f, 140.0f), 0.9f);
     add_enemy(state, vec2_make(560.0f, 60.0f), 1.8f);
@@ -1099,18 +1517,23 @@ static void setup_cache_raid(GameState *state) {
 
 static void setup_hostage_recovery(GameState *state) {
     copy_name(state->missionName, sizeof(state->missionName), "Hostage Recovery");
-    copy_name(state->missionBrief, sizeof(state->missionBrief), "Push through the village blocks, secure the captive beacon from the central safehouse, and extract south.");
+    copy_name(state->missionBrief, sizeof(state->missionBrief), "Push the village blocks, cut through the safehouse gate, lift the beacon, and use the radio net to keep the exfil route clean.");
     state->objectiveTarget = 1;
     state->extractionZone = vec2_make(160.0f, -760.0f);
     state->extractionRadius = 96.0f;
     setup_common_player(state, vec2_make(-980.0f, 540.0f));
+
+    paint_terrain_rect(state, vec2_make(420.0f, 250.0f), vec2_make(620.0f, 380.0f), TerrainMaterial_Compound, 10.0f, false);
+    paint_terrain_rect(state, vec2_make(820.0f, -280.0f), vec2_make(340.0f, 220.0f), TerrainMaterial_Rock, 12.0f, false);
 
     add_structure(state, StructureKind_Road, vec2_make(-120.0f, 120.0f), vec2_make(1260.0f, 94.0f), 0.0f, false, false, false, false);
     add_structure(state, StructureKind_TreeCluster, vec2_make(-720.0f, 300.0f), vec2_make(220.0f, 220.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_Building, vec2_make(-180.0f, 260.0f), vec2_make(180.0f, 120.0f), 0.0f, true, true, false, false);
     add_structure(state, StructureKind_Building, vec2_make(120.0f, 260.0f), vec2_make(180.0f, 120.0f), 0.0f, true, true, false, false);
     add_structure(state, StructureKind_Building, vec2_make(420.0f, 260.0f), vec2_make(220.0f, 150.0f), 0.0f, true, true, false, false);
-    add_structure(state, StructureKind_LowWall, vec2_make(420.0f, 420.0f), vec2_make(340.0f, 24.0f), 0.0f, true, true, true, false);
+    add_structure(state, StructureKind_LowWall, vec2_make(330.0f, 420.0f), vec2_make(140.0f, 24.0f), 0.0f, true, true, true, false);
+    add_structure(state, StructureKind_LowWall, vec2_make(510.0f, 420.0f), vec2_make(140.0f, 24.0f), 0.0f, true, true, true, false);
+    add_gate(state, vec2_make(420.0f, 420.0f), false, "Safehouse gate");
     add_structure(state, StructureKind_LowWall, vec2_make(560.0f, 250.0f), vec2_make(24.0f, 220.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_TreeCluster, vec2_make(760.0f, -40.0f), vec2_make(210.0f, 200.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_Ridge, vec2_make(860.0f, -300.0f), vec2_make(280.0f, 140.0f), 0.0f, true, true, false, false);
@@ -1136,6 +1559,11 @@ static void setup_hostage_recovery(GameState *state) {
                                             false));
     add_world_item(state, make_world_supply("Combat Gauze", ItemKind_Medkit, AmmoType_None, vec2_make(520.0f, 320.0f), 1, 0, false));
 
+    add_interactable(state, InteractableKind_SupplyCrate, vec2_make(500.0f, 340.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 45, 34, 15, "aid-and-ammo crate");
+    add_interactable(state, InteractableKind_DeadDrop, vec2_make(-660.0f, 340.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 0, 17, 0, "village dead drop");
+    add_interactable(state, InteractableKind_Radio, vec2_make(760.0f, -40.0f), vec2_make(34.0f, 34.0f), 0.0f, -1, false, true, 0.0f, 0, 0, 0, "street relay");
+    add_interactable(state, InteractableKind_EmplacedWeapon, vec2_make(610.0f, 430.0f), vec2_make(42.0f, 28.0f), 0.0f, -1, false, false, 0.0f, 0, 0, 0, "courtyard MG");
+
     add_enemy(state, vec2_make(-360.0f, 180.0f), 0.4f);
     add_enemy(state, vec2_make(-80.0f, 260.0f), 1.2f);
     add_enemy(state, vec2_make(220.0f, 240.0f), 2.1f);
@@ -1146,11 +1574,14 @@ static void setup_hostage_recovery(GameState *state) {
 
 static void setup_recon_exfil(GameState *state) {
     copy_name(state->missionName, sizeof(state->missionName), "Recon & Exfil");
-    copy_name(state->missionBrief, sizeof(state->missionBrief), "Move through the tree line, collect observation packages from the ridge and radio shack, then slip out north.");
+    copy_name(state->missionBrief, sizeof(state->missionBrief), "Move the tree line, pull the ridge observation package, probe the shack net, and ghost north once the map is filled in.");
     state->objectiveTarget = 2;
     state->extractionZone = vec2_make(-1040.0f, 700.0f);
     state->extractionRadius = 96.0f;
     setup_common_player(state, vec2_make(1060.0f, -640.0f));
+
+    paint_terrain_rect(state, vec2_make(540.0f, -360.0f), vec2_make(540.0f, 260.0f), TerrainMaterial_Forest, 8.0f, true);
+    paint_terrain_rect(state, vec2_make(-620.0f, 500.0f), vec2_make(360.0f, 260.0f), TerrainMaterial_Forest, 10.0f, true);
 
     add_structure(state, StructureKind_Ridge, vec2_make(260.0f, -120.0f), vec2_make(420.0f, 150.0f), 0.0f, true, true, false, false);
     add_structure(state, StructureKind_Ridge, vec2_make(-220.0f, 220.0f), vec2_make(460.0f, 170.0f), 0.0f, true, true, false, false);
@@ -1158,7 +1589,9 @@ static void setup_recon_exfil(GameState *state) {
     add_structure(state, StructureKind_TreeCluster, vec2_make(420.0f, 220.0f), vec2_make(240.0f, 200.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_TreeCluster, vec2_make(-620.0f, 500.0f), vec2_make(240.0f, 220.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_Building, vec2_make(-40.0f, 420.0f), vec2_make(180.0f, 120.0f), 0.0f, true, true, false, false);
-    add_structure(state, StructureKind_LowWall, vec2_make(120.0f, 10.0f), vec2_make(260.0f, 24.0f), 0.0f, true, true, true, false);
+    add_structure(state, StructureKind_LowWall, vec2_make(70.0f, 10.0f), vec2_make(120.0f, 24.0f), 0.0f, true, true, true, false);
+    add_structure(state, StructureKind_LowWall, vec2_make(170.0f, 10.0f), vec2_make(60.0f, 24.0f), 0.0f, true, true, true, false);
+    add_gate(state, vec2_make(120.0f, 10.0f), false, "Observation gate");
     add_structure(state, StructureKind_Road, vec2_make(-520.0f, 20.0f), vec2_make(720.0f, 76.0f), -0.15f, false, false, false, false);
 
     add_world_item(state, make_world_objective("Observation Reel", vec2_make(260.0f, -120.0f)));
@@ -1183,6 +1616,11 @@ static void setup_recon_exfil(GameState *state) {
     add_world_item(state, make_world_supply("Combat Gauze", ItemKind_Medkit, AmmoType_None, vec2_make(-760.0f, 540.0f), 1, 0, false));
     add_world_item(state, make_world_supply("Threaded Suppressor", ItemKind_Attachment, AmmoType_None, vec2_make(420.0f, 220.0f), 1, 0, true));
 
+    add_interactable(state, InteractableKind_SupplyCrate, vec2_make(-740.0f, 560.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 60, 17, 0, "concealed resupply crate");
+    add_interactable(state, InteractableKind_DeadDrop, vec2_make(430.0f, 240.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 30, 17, 0, "treeline dead drop");
+    add_interactable(state, InteractableKind_Radio, vec2_make(-20.0f, 460.0f), vec2_make(34.0f, 34.0f), 0.0f, -1, false, true, 0.0f, 0, 0, 0, "shack receiver");
+    add_interactable(state, InteractableKind_EmplacedWeapon, vec2_make(240.0f, -30.0f), vec2_make(42.0f, 28.0f), 0.0f, -1, false, false, 0.0f, 0, 0, 0, "ridge LMG");
+
     add_enemy(state, vec2_make(420.0f, -220.0f), 0.8f);
     add_enemy(state, vec2_make(180.0f, 60.0f), 1.6f);
     add_enemy(state, vec2_make(-80.0f, 380.0f), 2.4f);
@@ -1192,16 +1630,21 @@ static void setup_recon_exfil(GameState *state) {
 
 static void setup_convoy_ambush(GameState *state) {
     copy_name(state->missionName, sizeof(state->missionName), "Convoy Ambush");
-    copy_name(state->missionBrief, sizeof(state->missionBrief), "Break the roadside convoy, recover the manifest and crypto tablet, then withdraw west through the trees.");
+    copy_name(state->missionBrief, sizeof(state->missionBrief), "Break the road column, strip the manifest and tablet, raid the dead drop and support point if needed, then slide west through the trees.");
     state->objectiveTarget = 2;
     state->extractionZone = vec2_make(-1100.0f, 140.0f);
     state->extractionRadius = 100.0f;
     setup_common_player(state, vec2_make(1040.0f, 60.0f));
 
+    paint_terrain_rect(state, vec2_make(60.0f, 60.0f), vec2_make(1560.0f, 120.0f), TerrainMaterial_Road, -5.0f, false);
+    paint_terrain_rect(state, vec2_make(-760.0f, 120.0f), vec2_make(420.0f, 280.0f), TerrainMaterial_Forest, 6.0f, true);
+
     add_structure(state, StructureKind_Road, vec2_make(60.0f, 60.0f), vec2_make(1520.0f, 88.0f), 0.0f, false, false, false, false);
     add_structure(state, StructureKind_Convoy, vec2_make(300.0f, 60.0f), vec2_make(220.0f, 80.0f), 0.0f, true, true, false, false);
     add_structure(state, StructureKind_Convoy, vec2_make(-20.0f, 60.0f), vec2_make(220.0f, 80.0f), 0.0f, true, true, false, false);
-    add_structure(state, StructureKind_LowWall, vec2_make(-260.0f, 220.0f), vec2_make(280.0f, 24.0f), 0.0f, true, true, true, false);
+    add_structure(state, StructureKind_LowWall, vec2_make(-320.0f, 220.0f), vec2_make(160.0f, 24.0f), 0.0f, true, true, true, false);
+    add_structure(state, StructureKind_LowWall, vec2_make(-180.0f, 220.0f), vec2_make(80.0f, 24.0f), 0.0f, true, true, true, false);
+    add_gate(state, vec2_make(-260.0f, 220.0f), false, "Roadblock gate");
     add_structure(state, StructureKind_LowWall, vec2_make(620.0f, -120.0f), vec2_make(260.0f, 24.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_TreeCluster, vec2_make(860.0f, -220.0f), vec2_make(260.0f, 220.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_TreeCluster, vec2_make(-620.0f, 180.0f), vec2_make(260.0f, 220.0f), 0.0f, false, false, false, true);
@@ -1214,6 +1657,11 @@ static void setup_convoy_ambush(GameState *state) {
     add_world_item(state, make_world_supply("9mm Magazine", ItemKind_Magazine, AmmoType_9mm, vec2_make(-300.0f, 220.0f), 2, 17, false));
     add_world_item(state, make_world_weapon("Breaching Knife", WeaponClass_Knife, AmmoType_None, vec2_make(-720.0f, 220.0f), 0, 0, 68.0f, false, 0.0f, 0.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), false, false, false));
     add_world_item(state, make_world_supply("Combat Gauze", ItemKind_Medkit, AmmoType_None, vec2_make(-860.0f, -220.0f), 1, 0, false));
+
+    add_interactable(state, InteractableKind_SupplyCrate, vec2_make(660.0f, -120.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 60, 17, 10, "convoy crate");
+    add_interactable(state, InteractableKind_DeadDrop, vec2_make(-660.0f, 220.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 30, 17, 0, "fallback dead drop");
+    add_interactable(state, InteractableKind_Radio, vec2_make(240.0f, 120.0f), vec2_make(34.0f, 34.0f), 0.0f, -1, false, true, 0.0f, 0, 0, 0, "convoy radio");
+    add_interactable(state, InteractableKind_EmplacedWeapon, vec2_make(-340.0f, 240.0f), vec2_make(42.0f, 28.0f), 0.0f, -1, false, false, 0.0f, 0, 0, 0, "roadblock gun");
 
     add_enemy(state, vec2_make(520.0f, 60.0f), 0.5f);
     add_enemy(state, vec2_make(180.0f, 180.0f), 1.3f);
@@ -1232,6 +1680,8 @@ static void setup_mission(GameState *state, MissionType mission) {
     state->kills = 0;
     state->victory = false;
     state->missionFailed = false;
+    state->radioIntelUnlocked = false;
+    initialize_terrain(state, mission);
 
     switch (mission) {
         case MissionType_HostageRecovery:
@@ -1350,7 +1800,7 @@ void game_update(GameState *state, const InputState *input, float dt) {
         try_vault(state);
     }
     if (input->wantsCollect) {
-        collect_nearby_item(state);
+        interact_nearby(state);
     }
     if (input->wantsToggleFireMode) {
         toggle_fire_mode(state);
@@ -1387,6 +1837,7 @@ void game_update(GameState *state, const InputState *input, float dt) {
     state->player.triggerHeldLastFrame = input->wantsFire;
 
     update_projectiles(state, dt);
+    update_interactables(state, dt);
     update_enemies(state, dt);
 
     if (state->player.health <= 0.0f) {
@@ -1585,6 +2036,50 @@ const Structure *game_structure_at(const GameState *state, size_t index) {
     return NULL;
 }
 
+size_t game_interactable_count(const GameState *state) {
+    size_t count = 0;
+    size_t index;
+    for (index = 0; index < GAME_MAX_INTERACTABLES; index += 1) {
+        if (state->interactables[index].active) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+const Interactable *game_interactable_at(const GameState *state, size_t index) {
+    size_t count = 0;
+    size_t interactableIndex;
+    for (interactableIndex = 0; interactableIndex < GAME_MAX_INTERACTABLES; interactableIndex += 1) {
+        if (!state->interactables[interactableIndex].active) {
+            continue;
+        }
+        if (count == index) {
+            return &state->interactables[interactableIndex];
+        }
+        count += 1;
+    }
+    return NULL;
+}
+
+size_t game_terrain_tile_count(const GameState *state) {
+    size_t count = 0;
+    size_t index;
+    for (index = 0; index < GAME_MAX_TERRAIN_TILES; index += 1) {
+        if (state->terrainTiles[index].active) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+const TerrainTile *game_terrain_tile_at(const GameState *state, size_t index) {
+    if (index >= GAME_MAX_TERRAIN_TILES || !state->terrainTiles[index].active) {
+        return NULL;
+    }
+    return &state->terrainTiles[index];
+}
+
 float game_player_health(const GameState *state) {
     return state->player.health;
 }
@@ -1609,4 +2104,8 @@ int game_player_total_ammo(const GameState *state, AmmoType ammoType) {
         default:
             return 0;
     }
+}
+
+bool game_radio_intel_unlocked(const GameState *state) {
+    return state->radioIntelUnlocked;
 }

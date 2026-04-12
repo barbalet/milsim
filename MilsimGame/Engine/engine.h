@@ -12,7 +12,11 @@ extern "C" {
 #define GAME_MAX_PROJECTILES 64
 #define GAME_MAX_ENEMIES 16
 #define GAME_MAX_INVENTORY 24
-#define GAME_MAX_STRUCTURES 48
+#define GAME_MAX_STRUCTURES 56
+#define GAME_MAX_INTERACTABLES 24
+#define GAME_TERRAIN_COLUMNS 14
+#define GAME_TERRAIN_ROWS 10
+#define GAME_MAX_TERRAIN_TILES (GAME_TERRAIN_COLUMNS * GAME_TERRAIN_ROWS)
 #define GAME_EVENT_LENGTH 96
 
 typedef enum AmmoType {
@@ -69,8 +73,27 @@ typedef enum StructureKind {
     StructureKind_Building = 4,
     StructureKind_LowWall = 5,
     StructureKind_Tower = 6,
-    StructureKind_Convoy = 7
+    StructureKind_Convoy = 7,
+    StructureKind_Door = 8
 } StructureKind;
+
+typedef enum TerrainMaterial {
+    TerrainMaterial_Grass = 0,
+    TerrainMaterial_Road = 1,
+    TerrainMaterial_Mud = 2,
+    TerrainMaterial_Rock = 3,
+    TerrainMaterial_Compound = 4,
+    TerrainMaterial_Forest = 5
+} TerrainMaterial;
+
+typedef enum InteractableKind {
+    InteractableKind_None = 0,
+    InteractableKind_Door = 1,
+    InteractableKind_SupplyCrate = 2,
+    InteractableKind_DeadDrop = 3,
+    InteractableKind_Radio = 4,
+    InteractableKind_EmplacedWeapon = 5
+} InteractableKind;
 
 typedef struct Vec2 {
     float x;
@@ -171,6 +194,32 @@ typedef struct Structure {
     bool conceals;
 } Structure;
 
+typedef struct Interactable {
+    bool active;
+    InteractableKind kind;
+    Vec2 position;
+    Vec2 size;
+    float rotation;
+    int linkedStructureIndex;
+    bool toggled;
+    bool singleUse;
+    float cooldown;
+    int ammo556;
+    int ammo9mm;
+    int healthValue;
+    char name[32];
+} Interactable;
+
+typedef struct TerrainTile {
+    bool active;
+    Vec2 position;
+    Vec2 size;
+    float height;
+    TerrainMaterial material;
+    float navigationCost;
+    bool conceals;
+} TerrainTile;
+
 typedef struct Player {
     Vec2 position;
     Vec2 velocity;
@@ -201,6 +250,8 @@ typedef struct GameState {
     Projectile projectiles[GAME_MAX_PROJECTILES];
     Enemy enemies[GAME_MAX_ENEMIES];
     Structure structures[GAME_MAX_STRUCTURES];
+    Interactable interactables[GAME_MAX_INTERACTABLES];
+    TerrainTile terrainTiles[GAME_MAX_TERRAIN_TILES];
     MissionType missionType;
     Vec2 extractionZone;
     float extractionRadius;
@@ -211,6 +262,7 @@ typedef struct GameState {
     int kills;
     bool victory;
     bool missionFailed;
+    bool radioIntelUnlocked;
     char missionName[32];
     char missionBrief[GAME_EVENT_LENGTH];
     char lastEvent[GAME_EVENT_LENGTH];
@@ -258,10 +310,17 @@ const Projectile *game_projectile_at(const GameState *state, size_t index);
 size_t game_structure_count(const GameState *state);
 const Structure *game_structure_at(const GameState *state, size_t index);
 
+size_t game_interactable_count(const GameState *state);
+const Interactable *game_interactable_at(const GameState *state, size_t index);
+
+size_t game_terrain_tile_count(const GameState *state);
+const TerrainTile *game_terrain_tile_at(const GameState *state, size_t index);
+
 float game_player_health(const GameState *state);
 float game_player_stamina(const GameState *state);
 float game_player_lean(const GameState *state);
 int game_player_total_ammo(const GameState *state, AmmoType ammoType);
+bool game_radio_intel_unlocked(const GameState *state);
 
 #ifdef __cplusplus
 }
