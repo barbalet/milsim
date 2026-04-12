@@ -5,6 +5,7 @@ import simd
 fileprivate enum InputAction: Hashable {
     case collect
     case reload
+    case treatWounds
     case cycleNext
     case cyclePrevious
     case primary
@@ -41,6 +42,8 @@ final class InputController {
             queuedActions.insert(.collect)
         case 15:
             queuedActions.insert(.reload)
+        case 4:
+            queuedActions.insert(.treatWounds)
         case 48:
             queuedActions.insert(.cycleNext)
         case 11:
@@ -127,6 +130,7 @@ final class InputController {
         input.aimY = aimVector.y
         input.wantsCollect = queuedActions.remove(.collect) != nil
         input.wantsReload = queuedActions.remove(.reload) != nil
+        input.wantsTreatWounds = queuedActions.remove(.treatWounds) != nil
         input.wantsCycleNext = queuedActions.remove(.cycleNext) != nil
         input.wantsCyclePrevious = queuedActions.remove(.cyclePrevious) != nil
         input.wantsPrimary = queuedActions.remove(.primary) != nil

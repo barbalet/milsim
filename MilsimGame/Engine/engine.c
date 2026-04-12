@@ -93,6 +93,12 @@ static void update_discovery(GameState *state);
 static void update_radio_report(GameState *state, float dt);
 static const MissionScriptDefinition *mission_script_for(MissionType missionType);
 static void apply_mission_script(GameState *state, MissionType missionType);
+static int find_support_item_slot(const Player *player, ItemKind kind, const char *name);
+static int add_or_stack_support_item(Player *player, const char *name, ItemKind kind, AmmoType ammoType, int quantity, int capacity);
+static void remove_inventory_item(Player *player, int removedIndex);
+static void apply_player_suppression(GameState *state, float amount, bool announce);
+static void apply_player_hit(GameState *state, float damage, Vec2 impactVelocity);
+static void treat_wounds(GameState *state);
 
 static float clampf(float value, float minimum, float maximum) {
     if (value < minimum) {
@@ -408,7 +414,7 @@ static InventoryItem make_weapon(const char *name,
                                  WeaponClass weaponClass,
                                  AmmoType ammoType,
                                  int capacity,
-                                 int rounds,
+                                 int loadedRounds,
                                  float damage,
                                  float range,
                                  bool suppressed,
@@ -428,7 +434,12 @@ static InventoryItem make_weapon(const char *name,
     copy_name(item.name, sizeof(item.name), name);
     item.quantity = 1;
     item.magazineCapacity = capacity;
-    item.roundsInMagazine = rounds;
+    if (item.kind == ItemKind_Gun && loadedRounds > 0) {
+        item.roundChambered = true;
+        item.roundsInMagazine = clampi(loadedRounds - 1, 0, capacity);
+    } else {
+        item.roundsInMagazine = clampi(loadedRounds, 0, capacity);
+    }
     item.damage = damage;
     item.range = range;
     item.suppressed = suppressed;
@@ -460,7 +471,7 @@ static WorldItem make_world_weapon(const char *name,
                                    AmmoType ammoType,
                                    Vec2 position,
                                    int capacity,
-                                   int rounds,
+                                   int loadedRounds,
                                    float damage,
                                    bool suppressed,
                                    float recoil,
@@ -480,7 +491,12 @@ static WorldItem make_world_weapon(const char *name,
     copy_name(item.name, sizeof(item.name), name);
     item.quantity = 1;
     item.magazineCapacity = capacity;
-    item.roundsInMagazine = rounds;
+    if (item.kind == ItemKind_Gun && loadedRounds > 0) {
+        item.roundChambered = true;
+        item.roundsInMagazine = clampi(loadedRounds - 1, 0, capacity);
+    } else {
+        item.roundsInMagazine = clampi(loadedRounds, 0, capacity);
+    }
     item.damage = damage;
     item.suppressed = suppressed;
     item.recoil = recoil;
@@ -1336,6 +1352,7 @@ static void add_enemy(GameState *state, Vec2 position, float patrolPhase) {
             state->enemies[index].fireCooldown = 0.25f + (float) index * 0.07f;
             state->enemies[index].patrolPhase = patrolPhase;
             state->enemies[index].hitTimer = 0.0f;
+            state->enemies[index].suppression = 0.0f;
             state->enemies[index].currentNavNode = nearest_navigation_node(state, position);
             state->enemies[index].targetNavNode = -1;
             return;
@@ -1355,6 +1372,195 @@ static const InventoryItem *selected_item_const(const GameState *state) {
         return NULL;
     }
     return &state->player.inventory[state->player.selectedIndex];
+}
+
+static int find_support_item_slot(const Player *player, ItemKind kind, const char *name) {
+    int index;
+
+    for (index = 0; index < player->inventoryCount; index += 1) {
+        const InventoryItem *item = &player->inventory[index];
+        if (!item->active || item->kind != kind) {
+            continue;
+        }
+        if (name == NULL || strncmp(item->name, name, sizeof(item->name)) == 0) {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+static int add_or_stack_support_item(Player *player, const char *name, ItemKind kind, AmmoType ammoType, int quantity, int capacity) {
+    int existingIndex = find_support_item_slot(player, kind, name);
+    InventoryItem item;
+
+    if (existingIndex >= 0) {
+        player->inventory[existingIndex].quantity += quantity;
+        return existingIndex;
+    }
+
+    item = make_support_item(name, kind, ammoType, quantity, capacity);
+    return add_inventory_item(player, item);
+}
+
+static void adjust_index_after_removal(int *index, int removedIndex) {
+    if (*index == removedIndex) {
+        *index = -1;
+    } else if (*index > removedIndex) {
+        *index -= 1;
+    }
+}
+
+static void remove_inventory_item(Player *player, int removedIndex) {
+    int index;
+
+    if (removedIndex < 0 || removedIndex >= player->inventoryCount) {
+        return;
+    }
+
+    for (index = removedIndex; index < player->inventoryCount - 1; index += 1) {
+        player->inventory[index] = player->inventory[index + 1];
+    }
+
+    if (player->inventoryCount > 0) {
+        memset(&player->inventory[player->inventoryCount - 1], 0, sizeof(player->inventory[player->inventoryCount - 1]));
+        player->inventoryCount -= 1;
+    }
+
+    adjust_index_after_removal(&player->selectedIndex, removedIndex);
+    adjust_index_after_removal(&player->primaryIndex, removedIndex);
+    adjust_index_after_removal(&player->secondaryIndex, removedIndex);
+    adjust_index_after_removal(&player->meleeIndex, removedIndex);
+
+    if (player->selectedIndex < 0) {
+        if (player->primaryIndex >= 0) {
+            player->selectedIndex = player->primaryIndex;
+        } else if (player->inventoryCount > 0) {
+            player->selectedIndex = 0;
+        }
+    }
+}
+
+static const char *wound_flag_name(unsigned int woundFlag) {
+    switch (woundFlag) {
+        case WoundFlag_Arm:
+            return "arm";
+        case WoundFlag_Leg:
+            return "leg";
+        case WoundFlag_Torso:
+            return "torso";
+        case WoundFlag_None:
+        default:
+            return "body";
+    }
+}
+
+static unsigned int choose_player_wound_flag(const GameState *state, Vec2 impactVelocity) {
+    float seed = fabsf(impactVelocity.x) * 0.013f + fabsf(impactVelocity.y) * 0.017f + state->missionTime * 0.21f;
+    float roll = fabsf(sinf(seed));
+
+    if (roll < 0.34f) {
+        return WoundFlag_Arm;
+    }
+    if (roll < 0.68f) {
+        return WoundFlag_Leg;
+    }
+    return WoundFlag_Torso;
+}
+
+static void apply_player_suppression(GameState *state, float amount, bool announce) {
+    float previousSuppression = state->player.suppression;
+    state->player.suppression = clampf(state->player.suppression + amount, 0.0f, 100.0f);
+
+    if (announce && previousSuppression < 22.0f && state->player.suppression >= 22.0f) {
+        set_event(state, "Rounds cracking overhead.");
+    }
+}
+
+static void apply_player_hit(GameState *state, float damage, Vec2 impactVelocity) {
+    Player *player = &state->player;
+    unsigned int woundFlag = choose_player_wound_flag(state, impactVelocity);
+    float damageMultiplier = 1.0f;
+    float severity = clampf((damage / 14.0f) + (vec2_length(impactVelocity) / 1400.0f), 0.45f, 1.75f);
+    char buffer[GAME_EVENT_LENGTH];
+
+    switch (woundFlag) {
+        case WoundFlag_Arm:
+            damageMultiplier = 0.92f;
+            player->pain = clampf(player->pain + 16.0f * severity, 0.0f, 100.0f);
+            player->bleedingRate = clampf(player->bleedingRate + 0.32f * severity, 0.0f, 8.0f);
+            break;
+        case WoundFlag_Leg:
+            damageMultiplier = 0.98f;
+            player->pain = clampf(player->pain + 18.0f * severity, 0.0f, 100.0f);
+            player->bleedingRate = clampf(player->bleedingRate + 0.42f * severity, 0.0f, 8.0f);
+            break;
+        case WoundFlag_Torso:
+        default:
+            damageMultiplier = 1.14f;
+            player->pain = clampf(player->pain + 24.0f * severity, 0.0f, 100.0f);
+            player->bleedingRate = clampf(player->bleedingRate + 0.78f * severity, 0.0f, 8.0f);
+            break;
+    }
+
+    player->woundFlags |= woundFlag;
+    player->health = clampf(player->health - (damage * damageMultiplier), 0.0f, 100.0f);
+    player->hitTimer = 0.32f;
+    player->position = vec2_add(player->position, vec2_scale(vec2_normalize(impactVelocity), 10.0f));
+    apply_player_suppression(state, 20.0f + damage * 0.8f, false);
+
+    snprintf(buffer, sizeof(buffer), "Taking fire. %s wound opened.", wound_flag_name(woundFlag));
+    set_event(state, buffer);
+}
+
+static void treat_wounds(GameState *state) {
+    Player *player = &state->player;
+    int medkitIndex = find_support_item_slot(player, ItemKind_Medkit, NULL);
+    unsigned int treatedWound = WoundFlag_None;
+    InventoryItem *medkit;
+    char buffer[GAME_EVENT_LENGTH];
+
+    if (medkitIndex < 0) {
+        set_event(state, "No field dressing available.");
+        return;
+    }
+
+    if (player->bleedingRate <= 0.05f && player->pain <= 4.0f &&
+        player->woundFlags == WoundFlag_None && player->health >= 99.0f) {
+        set_event(state, "No urgent wounds to treat.");
+        return;
+    }
+
+    if ((player->woundFlags & WoundFlag_Torso) != 0) {
+        treatedWound = WoundFlag_Torso;
+        player->woundFlags &= ~WoundFlag_Torso;
+    } else if ((player->woundFlags & WoundFlag_Leg) != 0) {
+        treatedWound = WoundFlag_Leg;
+        player->woundFlags &= ~WoundFlag_Leg;
+    } else if ((player->woundFlags & WoundFlag_Arm) != 0) {
+        treatedWound = WoundFlag_Arm;
+        player->woundFlags &= ~WoundFlag_Arm;
+    }
+
+    player->bleedingRate = clampf(player->bleedingRate - (treatedWound == WoundFlag_Torso ? 1.6f : 1.2f), 0.0f, 8.0f);
+    player->pain = clampf(player->pain - 30.0f, 0.0f, 100.0f);
+    player->suppression = clampf(player->suppression - 18.0f, 0.0f, 100.0f);
+    player->health = clampf(player->health + 12.0f, 0.0f, 100.0f);
+    player->fireCooldown = clampf(player->fireCooldown, 0.25f, 1.0f);
+
+    medkit = &player->inventory[medkitIndex];
+    medkit->quantity -= 1;
+    if (medkit->quantity <= 0) {
+        remove_inventory_item(player, medkitIndex);
+    }
+
+    if (treatedWound == WoundFlag_None) {
+        set_event(state, "Applied field dressing and stabilized vitals.");
+        return;
+    }
+
+    snprintf(buffer, sizeof(buffer), "Applied field dressing to the %s wound.", wound_flag_name(treatedWound));
+    set_event(state, buffer);
 }
 
 static bool position_inside_structure(const Structure *structure, Vec2 position, float padding) {
@@ -1468,8 +1674,10 @@ static void spawn_projectile(GameState *state, Vec2 position, Vec2 direction, fl
             state->projectiles[index].position = position;
             state->projectiles[index].velocity = vec2_scale(vec2_normalize(direction), speed);
             state->projectiles[index].ttl = 1.85f;
+            state->projectiles[index].initialSpeed = speed;
             state->projectiles[index].damage = damage;
             state->projectiles[index].fromPlayer = fromPlayer;
+            state->projectiles[index].nearMissApplied = false;
             return;
         }
     }
@@ -1531,15 +1739,23 @@ static void collect_world_item(GameState *state, size_t index) {
             if (try_apply_suppressor(state)) {
                 set_event(state, "Mounted suppressor on current loadout.");
             } else {
-                add_inventory_item(player, make_support_item(worldItem->name, ItemKind_Attachment, AmmoType_None, 1, 0));
-                set_event(state, "Stored suppressor for later.");
+                if (add_or_stack_support_item(player, worldItem->name, ItemKind_Attachment, AmmoType_None, 1, 0) >= 0) {
+                    set_event(state, "Stored suppressor for later.");
+                } else {
+                    set_event(state, "Pack is full. Could not store suppressor.");
+                    return;
+                }
             }
             state->collectedItemCount += 1;
             break;
         }
         case ItemKind_Medkit: {
-            player->health = clampf(player->health + 30.0f, 0.0f, 100.0f);
-            set_event(state, "Applied field dressing.");
+            if (add_or_stack_support_item(player, worldItem->name, ItemKind_Medkit, AmmoType_None, worldItem->quantity, 0) < 0) {
+                set_event(state, "Pack is full. Could not recover field dressing.");
+                return;
+            }
+            snprintf(buffer, sizeof(buffer), "Stowed %s for treatment.", worldItem->name);
+            set_event(state, buffer);
             state->collectedItemCount += 1;
             break;
         }
@@ -1621,6 +1837,9 @@ static void interact_with_supply_crate(GameState *state, Interactable *interacta
     state->player.ammo556 += interactable->ammo556;
     state->player.ammo9mm += interactable->ammo9mm;
     state->player.health = clampf(state->player.health + (float) interactable->healthValue, 0.0f, 100.0f);
+    state->player.bleedingRate = clampf(state->player.bleedingRate - 0.8f, 0.0f, 8.0f);
+    state->player.pain = clampf(state->player.pain - 14.0f, 0.0f, 100.0f);
+    state->player.suppression = clampf(state->player.suppression - 8.0f, 0.0f, 100.0f);
     state->collectedItemCount += 1;
 
     snprintf(buffer,
@@ -1650,6 +1869,8 @@ static void interact_with_dead_drop(GameState *state, Interactable *interactable
     state->player.ammo556 += interactable->ammo556;
     state->player.ammo9mm += interactable->ammo9mm;
     state->player.health = clampf(state->player.health + (float) interactable->healthValue, 0.0f, 100.0f);
+    state->player.bleedingRate = clampf(state->player.bleedingRate - 0.5f, 0.0f, 8.0f);
+    state->player.pain = clampf(state->player.pain - 8.0f, 0.0f, 100.0f);
     state->collectedItemCount += 1;
     interactable->toggled = true;
 
@@ -1808,16 +2029,19 @@ static void interact_nearby(GameState *state) {
 static void reload_selected_weapon(GameState *state) {
     InventoryItem *item = selected_item(state);
     char buffer[GAME_EVENT_LENGTH];
+    bool hadChamberedRound;
 
     if (item == NULL || item->kind != ItemKind_Gun || item->weaponClass == WeaponClass_Knife) {
         set_event(state, "Select a firearm before reloading.");
         return;
     }
 
-    if (item->roundsInMagazine >= item->magazineCapacity) {
+    if (item->roundsInMagazine >= item->magazineCapacity && item->roundChambered) {
         set_event(state, "Magazine already topped off.");
         return;
     }
+
+    hadChamberedRound = item->roundChambered;
 
     {
         int *reserve = ammo_reserve(&state->player, item->ammoType);
@@ -1833,10 +2057,20 @@ static void reload_selected_weapon(GameState *state) {
         loaded = (*reserve < needed) ? *reserve : needed;
         *reserve -= loaded;
         item->roundsInMagazine += loaded;
+
+        if (!item->roundChambered && item->roundsInMagazine > 0) {
+            item->roundsInMagazine -= 1;
+            item->roundChambered = true;
+        }
     }
 
-    state->player.fireCooldown = 0.36f;
-    snprintf(buffer, sizeof(buffer), "Reloaded %s.", item->name);
+    state->player.fireCooldown = hadChamberedRound ? 0.42f : 0.54f;
+    snprintf(buffer,
+             sizeof(buffer),
+             "Reloaded %s: %d+%d ready.",
+             item->name,
+             item->roundsInMagazine,
+             item->roundChambered ? 1 : 0);
     set_event(state, buffer);
 }
 
@@ -1912,8 +2146,8 @@ static void fire_selected_weapon(GameState *state) {
         return;
     }
 
-    if (item->roundsInMagazine <= 0) {
-        set_event(state, "Magazine empty. Reload.");
+    if (!item->roundChambered) {
+        set_event(state, "Chamber empty. Reload.");
         state->player.fireCooldown = 0.16f;
         return;
     }
@@ -1925,6 +2159,9 @@ static void fire_selected_weapon(GameState *state) {
         float leanPenalty = fabsf(state->player.lean) * 0.3f;
         float opticBonus = item->opticMounted ? 0.75f : 1.0f;
         float burstPenalty = (item->fireMode == FireMode_Auto) ? 1.25f : (item->fireMode == FireMode_Burst ? 1.1f : 1.0f);
+        float painPenalty = 1.0f + (state->player.pain * 0.008f);
+        float suppressionPenalty = 1.0f + (state->player.suppression * 0.01f);
+        float armPenalty = (state->player.woundFlags & WoundFlag_Arm) != 0 ? 1.18f : 1.0f;
         float recoilAngle;
 
         if (state->player.stance == Stance_Crouch) {
@@ -1935,11 +2172,17 @@ static void fire_selected_weapon(GameState *state) {
 
         recoilAngle = item->recoil * stanceMultiplier * opticBonus * burstPenalty;
         recoilAngle *= (1.0f + leanPenalty);
+        recoilAngle *= painPenalty * suppressionPenalty * armPenalty;
         recoilAngle *= sinf((state->missionTime * 17.0f) + (float) state->collectedItemCount * 0.4f);
         direction = vec2_rotate(direction, recoilAngle);
     }
 
-    item->roundsInMagazine -= 1;
+    if (item->roundsInMagazine > 0) {
+        item->roundsInMagazine -= 1;
+        item->roundChambered = true;
+    } else {
+        item->roundChambered = false;
+    }
 
     if (item->weaponClass == WeaponClass_Pistol) {
         state->player.fireCooldown = item->suppressed ? 0.24f : 0.20f;
@@ -1958,6 +2201,7 @@ static void fire_selected_weapon(GameState *state) {
                      item->damage,
                      true);
     state->player.noiseTimer = item->suppressed ? 0.55f : 1.6f;
+    state->player.suppression = clampf(state->player.suppression - 4.0f, 0.0f, 100.0f);
 }
 
 static void toggle_crouch(GameState *state) {
@@ -2021,6 +2265,7 @@ static void update_player(GameState *state, const InputState *input, float dt) {
     Vec2 movement = vec2_make(input->moveX, input->moveY);
     float moveLength = vec2_length(movement);
     float speed;
+    float movePenalty = 1.0f;
     bool sprinting;
 
     sprinting = input->wantsSprint && moveLength > 0.2f && player->stance == Stance_Stand && player->stamina > 8.0f;
@@ -2038,6 +2283,16 @@ static void update_player(GameState *state, const InputState *input, float dt) {
             break;
     }
 
+    if ((player->woundFlags & WoundFlag_Leg) != 0) {
+        movePenalty *= 0.78f;
+    }
+    if ((player->woundFlags & WoundFlag_Torso) != 0) {
+        movePenalty *= 0.92f;
+    }
+    movePenalty *= (1.0f - clampf(player->pain * 0.003f, 0.0f, 0.22f));
+    movePenalty *= (1.0f - clampf(player->suppression * 0.002f, 0.0f, 0.18f));
+    speed *= clampf(movePenalty, 0.45f, 1.0f);
+
     if (moveLength > 0.001f) {
         Vec2 moveVelocity = vec2_scale(vec2_normalize(movement), speed * terrain_speed_multiplier(state, player->position));
         moveVelocity = vec2_scale(moveVelocity, 1.0f - (fabsf(input->lean) * 0.12f));
@@ -2051,7 +2306,8 @@ static void update_player(GameState *state, const InputState *input, float dt) {
         player->stamina = clampf(player->stamina - (24.0f * dt), 0.0f, 100.0f);
         player->noiseTimer = clampf(player->noiseTimer + (0.45f * dt), 0.0f, 2.0f);
     } else {
-        player->stamina = clampf(player->stamina + (16.0f * dt), 0.0f, 100.0f);
+        float regenRate = 16.0f - (player->pain * 0.09f) - (player->bleedingRate * 1.8f);
+        player->stamina = clampf(player->stamina + (regenRate * dt), 0.0f, 100.0f);
     }
 
     if (fabsf(input->aimX) > 0.01f || fabsf(input->aimY) > 0.01f) {
@@ -2062,6 +2318,9 @@ static void update_player(GameState *state, const InputState *input, float dt) {
     player->fireCooldown = clampf(player->fireCooldown - dt, 0.0f, 100.0f);
     player->hitTimer = clampf(player->hitTimer - dt, 0.0f, 10.0f);
     player->noiseTimer = clampf(player->noiseTimer - dt, 0.0f, 10.0f);
+    player->suppression = clampf(player->suppression - (24.0f * dt), 0.0f, 100.0f);
+    player->pain = clampf(player->pain - (6.0f * dt), 0.0f, 100.0f);
+    player->health = clampf(player->health - (player->bleedingRate * dt), 0.0f, 100.0f);
     clamp_player_to_world(player);
 }
 
@@ -2075,6 +2334,11 @@ static void update_projectiles(GameState *state, float dt) {
             continue;
         }
 
+        {
+            float dragFactor = 0.11f + (84.0f / clampf(projectile->initialSpeed, 320.0f, 1400.0f));
+            float velocityScale = clampf(1.0f - dragFactor * dt, 0.72f, 1.0f);
+            projectile->velocity = vec2_scale(projectile->velocity, velocityScale);
+        }
         projectile->position = vec2_add(projectile->position, vec2_scale(projectile->velocity, dt));
         projectile->ttl -= dt;
 
@@ -2095,8 +2359,10 @@ static void update_projectiles(GameState *state, float dt) {
 
                 if (vec2_distance(projectile->position, enemy->position) < kEnemyRadius) {
                     Vec2 hitDirection = vec2_normalize(projectile->velocity);
-                    enemy->health -= projectile->damage;
+                    float impactScale = clampf(vec2_length(projectile->velocity) / clampf(projectile->initialSpeed, 1.0f, 2400.0f), 0.65f, 1.0f);
+                    enemy->health -= projectile->damage * impactScale;
                     enemy->hitTimer = 0.24f;
+                    enemy->suppression = clampf(enemy->suppression + 24.0f, 0.0f, 100.0f);
                     enemy->position = vec2_add(enemy->position, vec2_scale(hitDirection, 16.0f));
                     projectile->active = false;
                     if (enemy->health <= 0.0f) {
@@ -2105,14 +2371,18 @@ static void update_projectiles(GameState *state, float dt) {
                         set_event(state, "Hostile neutralized.");
                     }
                     break;
+                } else if (!projectile->nearMissApplied && vec2_distance(projectile->position, enemy->position) < 86.0f) {
+                    enemy->suppression = clampf(enemy->suppression + 16.0f, 0.0f, 100.0f);
+                    projectile->nearMissApplied = true;
                 }
             }
         } else if (vec2_distance(projectile->position, state->player.position) < player_radius(&state->player)) {
-            state->player.health = clampf(state->player.health - projectile->damage, 0.0f, 100.0f);
-            state->player.hitTimer = 0.32f;
-            state->player.position = vec2_add(state->player.position, vec2_scale(vec2_normalize(projectile->velocity), 10.0f));
+            float impactScale = clampf(vec2_length(projectile->velocity) / clampf(projectile->initialSpeed, 1.0f, 2400.0f), 0.62f, 1.0f);
+            apply_player_hit(state, projectile->damage * impactScale, projectile->velocity);
             projectile->active = false;
-            set_event(state, "Taking fire.");
+        } else if (!projectile->nearMissApplied && vec2_distance(projectile->position, state->player.position) < 118.0f) {
+            apply_player_suppression(state, 12.0f, true);
+            projectile->nearMissApplied = true;
         }
     }
 }
@@ -2161,6 +2431,7 @@ static void update_enemies(GameState *state, float dt) {
         if (playerHeight > enemyHeight + 8.0f) {
             enemyDetectionRange *= 1.08f;
         }
+        enemy->suppression = clampf(enemy->suppression - (18.0f * dt), 0.0f, 100.0f);
 
         enemy->hitTimer = clampf(enemy->hitTimer - dt, 0.0f, 10.0f);
         toPlayer = vec2_sub(state->player.position, enemy->position);
@@ -2173,7 +2444,8 @@ static void update_enemies(GameState *state, float dt) {
 
             if (distanceToPlayer > 170.0f) {
                 float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
-                enemy->velocity = vec2_scale(moveDirection, 92.0f * terrainMultiplier);
+                float moveSpeed = 92.0f * terrainMultiplier * (1.0f - clampf(enemy->suppression * 0.003f, 0.0f, 0.42f));
+                enemy->velocity = vec2_scale(moveDirection, moveSpeed);
                 attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, dt)));
             } else {
                 enemy->velocity = vec2_make(0.0f, 0.0f);
@@ -2188,6 +2460,7 @@ static void update_enemies(GameState *state, float dt) {
                 if (player_in_concealment(state)) {
                     spread += 0.08f;
                 }
+                spread += enemy->suppression * 0.0032f;
                 spread *= sinf((state->missionTime * 1.7f) + enemy->patrolPhase);
                 {
                     Vec2 aim = vec2_rotate(moveDirection, spread);
@@ -2198,7 +2471,7 @@ static void update_enemies(GameState *state, float dt) {
                                      8.0f,
                                      false);
                 }
-                enemy->fireCooldown = 0.95f + 0.16f * (float) index;
+                enemy->fireCooldown = 0.95f + 0.16f * (float) index + enemy->suppression * 0.01f;
             }
         } else {
             if (enemy->currentNavNode < 0) {
@@ -2223,7 +2496,8 @@ static void update_enemies(GameState *state, float dt) {
                         enemy->velocity = vec2_make(0.0f, 0.0f);
                     } else {
                         float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
-                        enemy->velocity = vec2_scale(vec2_normalize(toPatrolTarget), 54.0f * terrainMultiplier);
+                        float patrolSpeed = 54.0f * terrainMultiplier * (1.0f - clampf(enemy->suppression * 0.0025f, 0.0f, 0.35f));
+                        enemy->velocity = vec2_scale(vec2_normalize(toPatrolTarget), patrolSpeed);
                         attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, dt)));
                     }
                 } else {
@@ -2243,6 +2517,7 @@ static void register_default_loadout_for_mission(MissionType missionType) {
     game_content_add_mission_loadout_entry(missionType, "mk18_carbine", LoadoutSlotHint_Primary);
     game_content_add_mission_loadout_entry(missionType, "m17_sidearm", LoadoutSlotHint_Secondary);
     game_content_add_mission_loadout_entry(missionType, "field_knife", LoadoutSlotHint_Melee);
+    game_content_add_mission_loadout_entry(missionType, "combat_gauze", LoadoutSlotHint_Gear);
 }
 
 static void register_default_content(void) {
@@ -2322,6 +2597,10 @@ static void setup_common_player(GameState *state, Vec2 startPosition) {
     player->lean = 0.0f;
     player->hitTimer = 0.0f;
     player->noiseTimer = 0.0f;
+    player->suppression = 0.0f;
+    player->bleedingRate = 0.0f;
+    player->pain = 0.0f;
+    player->woundFlags = WoundFlag_None;
     player->stance = Stance_Stand;
     player->inventoryCount = 0;
     player->selectedIndex = -1;
@@ -2736,6 +3015,9 @@ void game_update(GameState *state, const InputState *input, float dt) {
     }
     if (input->wantsCollect) {
         interact_nearby(state);
+    }
+    if (input->wantsTreatWounds) {
+        treat_wounds(state);
     }
     if (input->wantsToggleFireMode) {
         toggle_fire_mode(state);

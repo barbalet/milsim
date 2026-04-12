@@ -54,6 +54,13 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Added campaign save/load support that archives the live `GameState`, current mission, tactical-map state, and cross-operation progress to disk.
 - Added SwiftUI HUD and menu-bar controls for manual save/load so the prototype can be resumed between development sessions.
 
+### Cycle 3 Started
+
+- Added chamber-aware reload handling so firearms track a separate chambered round instead of treating the magazine as the only loaded state.
+- Added first-pass suppression, bleeding, pain, and wound tracking for the player, with drag-affected projectile energy and enemy suppression reactions.
+- Added combat-gauze treatment from loadout or pickups so the prototype now has a playable wound-treatment loop instead of health pickups only.
+- Updated the SwiftUI HUD to surface wound, suppression, bleed, and treatment state in real time during firefights.
+
 ## Cycle 0: Foundation and Playable Slice
 
 - Deliver a bootable macOS app with SwiftUI shell, Metal renderer, and C engine.
@@ -135,6 +142,6 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Begin Cycle 3 work on damage states, wound treatment, and fuller ballistic tradeoffs.
-- Add chamber-aware reload states, suppression effects, and first-pass wound treatment.
+- Expand Cycle 3 from first-pass treatment into fractures, richer wound zones, and stronger enemy damage-state reactions.
+- Add penetration classes, stronger ballistic/audio signatures, and attachment expansion beyond optics and suppressors.
 - Expand mission scripting into branching triggers, authored objective phases, and richer campaign slots.

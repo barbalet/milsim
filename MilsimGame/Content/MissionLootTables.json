@@ -5,7 +5,8 @@
       "items": [
         { "template": "mk18_carbine", "slot": "primary" },
         { "template": "m17_sidearm", "slot": "secondary" },
-        { "template": "field_knife", "slot": "melee" }
+        { "template": "field_knife", "slot": "melee" },
+        { "template": "combat_gauze", "slot": "gear" }
       ]
     },
     {
@@ -13,7 +14,8 @@
       "items": [
         { "template": "mk18_carbine", "slot": "primary" },
         { "template": "m17_sidearm", "slot": "secondary" },
-        { "template": "field_knife", "slot": "melee" }
+        { "template": "field_knife", "slot": "melee" },
+        { "template": "combat_gauze", "slot": "gear" }
       ]
     },
     {
@@ -21,7 +23,8 @@
       "items": [
         { "template": "mk18_carbine", "slot": "primary" },
         { "template": "m17_sidearm", "slot": "secondary" },
-        { "template": "field_knife", "slot": "melee" }
+        { "template": "field_knife", "slot": "melee" },
+        { "template": "combat_gauze", "slot": "gear" }
       ]
     },
     {
@@ -29,7 +32,8 @@
       "items": [
         { "template": "mk18_carbine", "slot": "primary" },
         { "template": "m17_sidearm", "slot": "secondary" },
-        { "template": "field_knife", "slot": "melee" }
+        { "template": "field_knife", "slot": "melee" },
+        { "template": "combat_gauze", "slot": "gear" }
       ]
     }
   ],

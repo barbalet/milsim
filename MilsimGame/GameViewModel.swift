@@ -65,6 +65,8 @@ struct HUDSnapshot {
     var posture = ""
     var health = ""
     var stamina = ""
+    var wounds = ""
+    var medical = ""
     var mission = ""
     var compass = ""
     var gridReference = ""
@@ -175,7 +177,7 @@ private struct CampaignSaveEnvelope: Codable {
 }
 
 private enum CampaignStore {
-    static let version = 1
+    static let version = 2
 
     static var saveURL: URL {
         let fileManager = FileManager.default
@@ -199,6 +201,12 @@ private enum CampaignStore {
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         try data.write(to: saveURL, options: .atomic)
     }
+}
+
+private enum WoundMask {
+    static let arm: UInt32 = 1 << 0
+    static let leg: UInt32 = 1 << 1
+    static let torso: UInt32 = 1 << 2
 }
 
 private enum CampaignSaveError: LocalizedError {
@@ -742,6 +750,26 @@ final class GameViewModel: ObservableObject {
         return saveStatus
     }
 
+    private func woundSummary(for flags: UInt32) -> String {
+        var wounds: [String] = []
+
+        if (flags & WoundMask.torso) != 0 {
+            wounds.append("torso")
+        }
+        if (flags & WoundMask.leg) != 0 {
+            wounds.append("leg")
+        }
+        if (flags & WoundMask.arm) != 0 {
+            wounds.append("arm")
+        }
+
+        return wounds.isEmpty ? "stable" : wounds.joined(separator: ", ")
+    }
+
+    private func formatRate(_ value: Float) -> String {
+        String(format: "%.1f", value)
+    }
+
     private func refreshHUD(force: Bool) {
         _ = force
 
@@ -768,9 +796,14 @@ final class GameViewModel: ObservableObject {
                     let reserve = game_player_total_ammo(statePointer, selectedItem.pointee.ammoType)
                     let suppressorText = selectedItem.pointee.suppressed ? " | suppressed" : ""
                     let opticText = selectedItem.pointee.opticMounted ? " | optic" : ""
-                    ammoLine = "\(selectedItem.pointee.roundsInMagazine)/\(selectedItem.pointee.magazineCapacity) in mag | \(reserve) reserve | \(fireMode)\(suppressorText)\(opticText)"
+                    let chamberText = selectedItem.pointee.roundChambered ? 1 : 0
+                    ammoLine = "\(selectedItem.pointee.roundsInMagazine)+\(chamberText) loaded | \(reserve) reserve | \(fireMode)\(suppressorText)\(opticText)"
                 } else if selectedItem.pointee.weaponClass == WeaponClass_Knife {
                     ammoLine = "Knife readied for close contact"
+                } else if selectedItem.pointee.kind == ItemKind_Medkit {
+                    ammoLine = "Field dressing x\(selectedItem.pointee.quantity) | Press H to treat"
+                } else if selectedItem.pointee.quantity > 0 {
+                    ammoLine = "\(selectedItem.pointee.quantity)x support item stowed"
                 }
             }
 
@@ -786,6 +819,7 @@ final class GameViewModel: ObservableObject {
             let inventoryCount = Int(game_inventory_count(statePointer))
             var rows: [InventoryRow] = []
             rows.reserveCapacity(inventoryCount)
+            var medkitCount = 0
 
             for index in 0..<inventoryCount {
                 guard let item = game_inventory_item_at(statePointer, index) else {
@@ -798,7 +832,8 @@ final class GameViewModel: ObservableObject {
                 if item.pointee.kind == ItemKind_Gun {
                     let reserve = game_player_total_ammo(statePointer, item.pointee.ammoType)
                     let itemFireMode = (selectedIndex == index) ? fireMode : fireModeName(for: item.pointee.fireMode)
-                    label += "  \(item.pointee.roundsInMagazine)/\(item.pointee.magazineCapacity) | \(reserve) | \(itemFireMode)"
+                    let chamberText = item.pointee.roundChambered ? 1 : 0
+                    label += "  \(item.pointee.roundsInMagazine)+\(chamberText) | \(reserve) | \(itemFireMode)"
                     if item.pointee.suppressed {
                         label += " | sup"
                     }
@@ -806,6 +841,10 @@ final class GameViewModel: ObservableObject {
                     label += "  CQB"
                 } else if item.pointee.quantity > 0 {
                     label += "  x\(item.pointee.quantity)"
+                }
+
+                if item.pointee.kind == ItemKind_Medkit {
+                    medkitCount += Int(item.pointee.quantity)
                 }
 
                 rows.append(InventoryRow(id: index, label: label, isSelected: selectedIndex == index))
@@ -834,13 +873,22 @@ final class GameViewModel: ObservableObject {
                 ? "Radio intel live. Hostiles and route updates are on the tactical map."
                 : "Radio intel dark. Discover sectors locally or tap a relay for hostile traffic."
             let radioReport = string(from: game_radio_report(statePointer))
-            let interactionHint = interactionHint(for: statePointer, playerPosition: playerPosition)
+            let baseInteractionHint = interactionHint(for: statePointer, playerPosition: playerPosition)
             let mapTiles = buildMapTiles(from: statePointer)
             let mapMarkers = buildMapMarkers(from: statePointer, playerPosition: playerPosition, radioIntelUnlocked: radioIntelUnlocked)
             let routeSegments = buildRouteSegments(from: statePointer)
             let routeSummary = routeSummary(from: statePointer, worldHalfSize: worldHalfSize)
             let campaignStatus = campaignStatusLine()
             let saveStatus = saveStatusLine()
+            let healthLine = "Health \(Int(game_player_health(statePointer))) | Pain \(Int(player.pain.rounded()))"
+            let staminaLine = "Stamina \(Int(game_player_stamina(statePointer))) | Supp \(Int(player.suppression.rounded()))%"
+            let woundLine = "Wounds \(woundSummary(for: UInt32(player.woundFlags)))"
+            let medicalLine = "Bleed \(formatRate(player.bleedingRate))/s | Gauze x\(medkitCount) | H to treat"
+            let needsTreatment = player.bleedingRate > 0.1 || player.pain > 18 || player.woundFlags != 0
+            let treatmentHint = needsTreatment
+                ? (medkitCount > 0 ? " Press H to treat wounds." : " Recover combat gauze to stabilize.")
+                : ""
+            let interactionHint = baseInteractionHint + treatmentHint
 
             hud = HUDSnapshot(
                 missionName: missionName,
@@ -850,8 +898,10 @@ final class GameViewModel: ObservableObject {
                 weapon: selectedName,
                 ammo: ammoLine,
                 posture: "\(stance)\(leanText)",
-                health: "Health \(Int(game_player_health(statePointer)))",
-                stamina: "Stamina \(Int(game_player_stamina(statePointer)))",
+                health: healthLine,
+                stamina: staminaLine,
+                wounds: woundLine,
+                medical: medicalLine,
                 mission: missionLine,
                 compass: compass,
                 gridReference: gridReference,

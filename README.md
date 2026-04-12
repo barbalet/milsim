@@ -6,7 +6,7 @@
 - Metal for rendering
 - C for the gameplay and simulation core
 
-The current build is a playable completed-Cycle-2 tactical-environment slice with persistence foundations: run four mission seeds, move through terrain tiles and compounds, use stance and lean to manage exposure, switch fire modes, vault low cover, collect military gear, work gates/crates/radios/emplaced guns, recover objective packages, and extract. Weapons, pickups, mission loot placement, and mission-script text now load from bundled JSON, while the tactical map tracks discovered markers, live radio reports, and a command route through the battlefield. The SwiftUI shell can also save and reload a live campaign archive from the HUD or menu bar.
+The current build is a playable tactical slice with completed Cycle 2 environment systems, persistence foundations, and an opening Cycle 3 combat pass: run four mission seeds, move through terrain tiles and compounds, use stance and lean to manage exposure, switch fire modes, vault low cover, collect military gear, work gates/crates/radios/emplaced guns, recover objective packages, and extract. Weapons, pickups, mission loot placement, and mission-script text load from bundled JSON, while the tactical map tracks discovered markers, live radio reports, and a command route through the battlefield. The SwiftUI shell can also save and reload a live campaign archive from the HUD or menu bar.
 
 ## Controls
 
@@ -16,6 +16,7 @@ The current build is a playable completed-Cycle-2 tactical-environment slice wit
 - Left mouse or `Space`: fire / attack
 - `F` or right mouse: use or recover nearby equipment
 - `R`: reload current firearm
+- `H`: treat wounds / apply combat gauze
 - `B`: toggle fire mode
 - `C`: crouch toggle
 - `Z`: prone toggle
@@ -30,7 +31,7 @@ The current build is a playable completed-Cycle-2 tactical-environment slice wit
 - `Command` + `L`: load the latest campaign archive
 - `Control` + `Command` + `F`: toggle full screen
 
-## Current Cycle 2 Features
+## Current Prototype Features
 
 - Four mission seeds: cache raid, hostage recovery, recon-and-exfil, convoy ambush
 - Tiled terrain metadata in the C engine with materials, concealment, and movement costs
@@ -40,8 +41,8 @@ The current build is a playable completed-Cycle-2 tactical-environment slice wit
 - SwiftUI tactical map with grid references, compass heading, discovered markers, command route overlays, radio reports, and radio-gated hostile intel
 - Bundled JSON item definitions and mission loot tables loaded into the C engine at startup
 - Bundled JSON mission scripts for brief, initial-event, and radio-callout overrides
-- C simulation support for stance, lean, vaulting, fire modes, muzzle velocity, recoil, suppressor mounting, and objective extraction
-- SwiftUI HUD support for mission briefs, posture, fire mode, interaction hints, inventory state, operation cycling, and manual campaign save/load
+- C simulation support for stance, lean, vaulting, fire modes, chamber-aware reloads, drag-affected projectiles, suppression, bleeding, pain, field dressing, suppressor mounting, and objective extraction
+- SwiftUI HUD support for mission briefs, posture, chamber status, wound state, suppression, interaction hints, inventory state, operation cycling, and manual campaign save/load
 
 ## Project Layout
 

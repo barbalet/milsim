@@ -60,6 +60,13 @@ typedef enum Stance {
     Stance_Prone = 2
 } Stance;
 
+typedef enum WoundFlag {
+    WoundFlag_None = 0,
+    WoundFlag_Arm = 1 << 0,
+    WoundFlag_Leg = 1 << 1,
+    WoundFlag_Torso = 1 << 2
+} WoundFlag;
+
 typedef enum MissionType {
     MissionType_CacheRaid = 0,
     MissionType_HostageRecovery = 1,
@@ -126,6 +133,7 @@ typedef struct InputState {
     bool wantsPrimary;
     bool wantsSecondary;
     bool wantsMelee;
+    bool wantsTreatWounds;
     bool wantsToggleFireMode;
     bool wantsCrouchToggle;
     bool wantsProneToggle;
@@ -141,6 +149,7 @@ typedef struct InventoryItem {
     int quantity;
     int magazineCapacity;
     int roundsInMagazine;
+    bool roundChambered;
     float damage;
     float range;
     bool suppressed;
@@ -164,6 +173,7 @@ typedef struct WorldItem {
     int quantity;
     int magazineCapacity;
     int roundsInMagazine;
+    bool roundChambered;
     float damage;
     bool suppressed;
     float recoil;
@@ -180,8 +190,10 @@ typedef struct Projectile {
     Vec2 position;
     Vec2 velocity;
     float ttl;
+    float initialSpeed;
     float damage;
     bool fromPlayer;
+    bool nearMissApplied;
 } Projectile;
 
 typedef struct Enemy {
@@ -192,6 +204,7 @@ typedef struct Enemy {
     float fireCooldown;
     float patrolPhase;
     float hitTimer;
+    float suppression;
     int currentNavNode;
     int targetNavNode;
 } Enemy;
@@ -258,6 +271,10 @@ typedef struct Player {
     float lean;
     float hitTimer;
     float noiseTimer;
+    float suppression;
+    float bleedingRate;
+    float pain;
+    unsigned int woundFlags;
     Stance stance;
     int inventoryCount;
     int selectedIndex;
