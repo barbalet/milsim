@@ -60,6 +60,9 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Added first-pass suppression, bleeding, pain, and wound tracking for the player, with drag-affected projectile energy and enemy suppression reactions.
 - Added combat-gauze treatment from loadout or pickups so the prototype now has a playable wound-treatment loop instead of health pickups only.
 - Updated the SwiftUI HUD to surface wound, suppression, bleed, and treatment state in real time during firefights.
+- Expanded damage modeling with head wounds, limb fractures, stamina shock, and combat splints so recovery now has separate bleeding and fracture treatment decisions.
+- Added wounded-enemy fallback behavior plus pain and bleed penalties so hostile reactions feel less binary than patrol-or-fire.
+- Added limited thin-cover penetration through doors and select low walls to start the Cycle 3 penetration-class work.
 
 ## Cycle 0: Foundation and Playable Slice
 
@@ -142,6 +145,6 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Expand Cycle 3 from first-pass treatment into fractures, richer wound zones, and stronger enemy damage-state reactions.
-- Add penetration classes, stronger ballistic/audio signatures, and attachment expansion beyond optics and suppressors.
+- Expand Cycle 3 from thin-cover penetration into broader surface classes, stronger ballistic/audio signatures, and attachment expansion beyond optics and suppressors.
 - Expand mission scripting into branching triggers, authored objective phases, and richer campaign slots.
+- Start the first Cycle 4 command-layer pass with friendly AI teammates or lightweight fireteam orders once the current combat loop feels stable.

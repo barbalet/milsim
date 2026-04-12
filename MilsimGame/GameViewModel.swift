@@ -177,7 +177,7 @@ private struct CampaignSaveEnvelope: Codable {
 }
 
 private enum CampaignStore {
-    static let version = 2
+    static let version = 3
 
     static var saveURL: URL {
         let fileManager = FileManager.default
@@ -207,6 +207,12 @@ private enum WoundMask {
     static let arm: UInt32 = 1 << 0
     static let leg: UInt32 = 1 << 1
     static let torso: UInt32 = 1 << 2
+    static let head: UInt32 = 1 << 3
+}
+
+private enum FractureMask {
+    static let arm: UInt32 = 1 << 0
+    static let leg: UInt32 = 1 << 1
 }
 
 private enum CampaignSaveError: LocalizedError {
@@ -753,6 +759,9 @@ final class GameViewModel: ObservableObject {
     private func woundSummary(for flags: UInt32) -> String {
         var wounds: [String] = []
 
+        if (flags & WoundMask.head) != 0 {
+            wounds.append("head")
+        }
         if (flags & WoundMask.torso) != 0 {
             wounds.append("torso")
         }
@@ -764,6 +773,19 @@ final class GameViewModel: ObservableObject {
         }
 
         return wounds.isEmpty ? "stable" : wounds.joined(separator: ", ")
+    }
+
+    private func fractureSummary(for flags: UInt32) -> String {
+        var fractures: [String] = []
+
+        if (flags & FractureMask.leg) != 0 {
+            fractures.append("leg")
+        }
+        if (flags & FractureMask.arm) != 0 {
+            fractures.append("arm")
+        }
+
+        return fractures.isEmpty ? "none" : fractures.joined(separator: ", ")
     }
 
     private func formatRate(_ value: Float) -> String {
@@ -801,7 +823,12 @@ final class GameViewModel: ObservableObject {
                 } else if selectedItem.pointee.weaponClass == WeaponClass_Knife {
                     ammoLine = "Knife readied for close contact"
                 } else if selectedItem.pointee.kind == ItemKind_Medkit {
-                    ammoLine = "Field dressing x\(selectedItem.pointee.quantity) | Press H to treat"
+                    let selectedItemName = string(from: game_inventory_item_name(statePointer, selectedIndex))
+                    if selectedItemName.lowercased().contains("splint") {
+                        ammoLine = "\(selectedItemName) x\(selectedItem.pointee.quantity) | Press H to stabilize fractures"
+                    } else {
+                        ammoLine = "\(selectedItemName) x\(selectedItem.pointee.quantity) | Press H to treat"
+                    }
                 } else if selectedItem.pointee.quantity > 0 {
                     ammoLine = "\(selectedItem.pointee.quantity)x support item stowed"
                 }
@@ -819,7 +846,8 @@ final class GameViewModel: ObservableObject {
             let inventoryCount = Int(game_inventory_count(statePointer))
             var rows: [InventoryRow] = []
             rows.reserveCapacity(inventoryCount)
-            var medkitCount = 0
+            var gauzeCount = 0
+            var splintCount = 0
 
             for index in 0..<inventoryCount {
                 guard let item = game_inventory_item_at(statePointer, index) else {
@@ -844,7 +872,11 @@ final class GameViewModel: ObservableObject {
                 }
 
                 if item.pointee.kind == ItemKind_Medkit {
-                    medkitCount += Int(item.pointee.quantity)
+                    if name.lowercased().contains("splint") {
+                        splintCount += Int(item.pointee.quantity)
+                    } else {
+                        gauzeCount += Int(item.pointee.quantity)
+                    }
                 }
 
                 rows.append(InventoryRow(id: index, label: label, isSelected: selectedIndex == index))
@@ -880,13 +912,17 @@ final class GameViewModel: ObservableObject {
             let routeSummary = routeSummary(from: statePointer, worldHalfSize: worldHalfSize)
             let campaignStatus = campaignStatusLine()
             let saveStatus = saveStatusLine()
-            let healthLine = "Health \(Int(game_player_health(statePointer))) | Pain \(Int(player.pain.rounded()))"
+            let healthLine = "Health \(Int(game_player_health(statePointer))) | Pain \(Int(player.pain.rounded())) | Shock \(Int(player.staminaShock.rounded()))"
             let staminaLine = "Stamina \(Int(game_player_stamina(statePointer))) | Supp \(Int(player.suppression.rounded()))%"
-            let woundLine = "Wounds \(woundSummary(for: UInt32(player.woundFlags)))"
-            let medicalLine = "Bleed \(formatRate(player.bleedingRate))/s | Gauze x\(medkitCount) | H to treat"
-            let needsTreatment = player.bleedingRate > 0.1 || player.pain > 18 || player.woundFlags != 0
+            let woundLine = "Wounds \(woundSummary(for: UInt32(player.woundFlags))) | Fractures \(fractureSummary(for: UInt32(player.fractureFlags)))"
+            let medicalLine = "Bleed \(formatRate(player.bleedingRate))/s | Gauze x\(gauzeCount) | Splint x\(splintCount) | H to treat"
+            let needsTreatment = player.bleedingRate > 0.1 ||
+                player.pain > 18 ||
+                player.woundFlags != 0 ||
+                player.fractureFlags != 0 ||
+                player.staminaShock > 12
             let treatmentHint = needsTreatment
-                ? (medkitCount > 0 ? " Press H to treat wounds." : " Recover combat gauze to stabilize.")
+                ? ((gauzeCount + splintCount) > 0 ? " Press H to treat wounds." : " Recover gauze or a splint to stabilize.")
                 : ""
             let interactionHint = baseInteractionHint + treatmentHint
 

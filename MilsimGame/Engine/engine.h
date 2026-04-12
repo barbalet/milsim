@@ -64,8 +64,15 @@ typedef enum WoundFlag {
     WoundFlag_None = 0,
     WoundFlag_Arm = 1 << 0,
     WoundFlag_Leg = 1 << 1,
-    WoundFlag_Torso = 1 << 2
+    WoundFlag_Torso = 1 << 2,
+    WoundFlag_Head = 1 << 3
 } WoundFlag;
+
+typedef enum FractureFlag {
+    FractureFlag_None = 0,
+    FractureFlag_Arm = 1 << 0,
+    FractureFlag_Leg = 1 << 1
+} FractureFlag;
 
 typedef enum MissionType {
     MissionType_CacheRaid = 0,
@@ -194,6 +201,7 @@ typedef struct Projectile {
     float damage;
     bool fromPlayer;
     bool nearMissApplied;
+    int penetrationsRemaining;
 } Projectile;
 
 typedef struct Enemy {
@@ -205,6 +213,11 @@ typedef struct Enemy {
     float patrolPhase;
     float hitTimer;
     float suppression;
+    float bleedingRate;
+    float pain;
+    unsigned int woundFlags;
+    unsigned int fractureFlags;
+    bool fallingBack;
     int currentNavNode;
     int targetNavNode;
 } Enemy;
@@ -274,7 +287,9 @@ typedef struct Player {
     float suppression;
     float bleedingRate;
     float pain;
+    float staminaShock;
     unsigned int woundFlags;
+    unsigned int fractureFlags;
     Stance stance;
     int inventoryCount;
     int selectedIndex;

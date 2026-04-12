@@ -99,6 +99,13 @@
       "quantity": 1
     },
     {
+      "id": "combat_splint",
+      "name": "Combat Splint",
+      "kind": "medkit",
+      "ammoType": "none",
+      "quantity": 1
+    },
+    {
       "id": "recon_rifle",
       "name": "Recon Rifle",
       "kind": "gun",
