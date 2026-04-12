@@ -15,6 +15,60 @@ static const float kEnemyRadius = 18.0f;
 static const size_t kCollectionTarget = 8;
 static MissionType sMissionCursor = MissionType_CacheRaid;
 
+enum {
+    kMaxContentItemTemplates = 48,
+    kMaxMissionLoadoutEntries = 32,
+    kMaxMissionLootEntries = 96
+};
+
+typedef struct ContentItemTemplate {
+    bool active;
+    char identifier[32];
+    ItemKind kind;
+    AmmoType ammoType;
+    WeaponClass weaponClass;
+    char name[32];
+    int quantity;
+    int magazineCapacity;
+    int roundsInMagazine;
+    float damage;
+    float range;
+    bool suppressed;
+    float recoil;
+    float muzzleVelocity;
+    FireMode fireMode;
+    unsigned int supportedFireModes;
+    bool supportsSuppressor;
+    bool supportsOptic;
+    bool opticMounted;
+} ContentItemTemplate;
+
+typedef struct MissionLoadoutEntry {
+    bool active;
+    MissionType missionType;
+    char templateIdentifier[32];
+    LoadoutSlotHint slotHint;
+} MissionLoadoutEntry;
+
+typedef struct MissionLootEntry {
+    bool active;
+    MissionType missionType;
+    char templateIdentifier[32];
+    Vec2 position;
+} MissionLootEntry;
+
+static ContentItemTemplate sContentItemTemplates[kMaxContentItemTemplates];
+static MissionLoadoutEntry sMissionLoadoutEntries[kMaxMissionLoadoutEntries];
+static MissionLootEntry sMissionLootEntries[kMaxMissionLootEntries];
+static size_t sContentItemTemplateCount = 0;
+static size_t sMissionLoadoutEntryCount = 0;
+static size_t sMissionLootEntryCount = 0;
+
+static int add_inventory_item(Player *player, InventoryItem item);
+static void add_world_item(GameState *state, WorldItem item);
+static void register_default_content(void);
+static void ensure_content_database_loaded(void);
+
 static float clampf(float value, float minimum, float maximum) {
     if (value < minimum) {
         return minimum;
@@ -160,6 +214,106 @@ static float default_weapon_range(WeaponClass weaponClass, float muzzleVelocity)
     }
 }
 
+static bool identifier_matches(const char *left, const char *right) {
+    return strncmp(left, right, 32) == 0;
+}
+
+static void clear_content_database_internal(void) {
+    memset(sContentItemTemplates, 0, sizeof(sContentItemTemplates));
+    memset(sMissionLoadoutEntries, 0, sizeof(sMissionLoadoutEntries));
+    memset(sMissionLootEntries, 0, sizeof(sMissionLootEntries));
+    sContentItemTemplateCount = 0;
+    sMissionLoadoutEntryCount = 0;
+    sMissionLootEntryCount = 0;
+}
+
+void game_content_reset(void) {
+    clear_content_database_internal();
+}
+
+bool game_content_add_item_template(const char *identifier,
+                                    const char *name,
+                                    ItemKind kind,
+                                    AmmoType ammoType,
+                                    WeaponClass weaponClass,
+                                    int quantity,
+                                    int magazineCapacity,
+                                    int roundsInMagazine,
+                                    float damage,
+                                    float range,
+                                    bool suppressed,
+                                    float recoil,
+                                    float muzzleVelocity,
+                                    FireMode fireMode,
+                                    unsigned int supportedFireModes,
+                                    bool supportsSuppressor,
+                                    bool supportsOptic,
+                                    bool opticMounted) {
+    ContentItemTemplate *itemTemplate;
+
+    if (identifier == NULL || name == NULL || sContentItemTemplateCount >= kMaxContentItemTemplates) {
+        return false;
+    }
+
+    itemTemplate = &sContentItemTemplates[sContentItemTemplateCount];
+    memset(itemTemplate, 0, sizeof(*itemTemplate));
+    itemTemplate->active = true;
+    copy_name(itemTemplate->identifier, sizeof(itemTemplate->identifier), identifier);
+    copy_name(itemTemplate->name, sizeof(itemTemplate->name), name);
+    itemTemplate->kind = kind;
+    itemTemplate->ammoType = ammoType;
+    itemTemplate->weaponClass = weaponClass;
+    itemTemplate->quantity = quantity;
+    itemTemplate->magazineCapacity = magazineCapacity;
+    itemTemplate->roundsInMagazine = roundsInMagazine;
+    itemTemplate->damage = damage;
+    itemTemplate->range = range;
+    itemTemplate->suppressed = suppressed;
+    itemTemplate->recoil = recoil;
+    itemTemplate->muzzleVelocity = muzzleVelocity;
+    itemTemplate->fireMode = fireMode;
+    itemTemplate->supportedFireModes = supportedFireModes;
+    itemTemplate->supportsSuppressor = supportsSuppressor;
+    itemTemplate->supportsOptic = supportsOptic;
+    itemTemplate->opticMounted = opticMounted;
+    sContentItemTemplateCount += 1;
+    return true;
+}
+
+bool game_content_add_mission_loadout_entry(MissionType missionType, const char *templateIdentifier, LoadoutSlotHint slotHint) {
+    MissionLoadoutEntry *entry;
+
+    if (templateIdentifier == NULL || sMissionLoadoutEntryCount >= kMaxMissionLoadoutEntries) {
+        return false;
+    }
+
+    entry = &sMissionLoadoutEntries[sMissionLoadoutEntryCount];
+    memset(entry, 0, sizeof(*entry));
+    entry->active = true;
+    entry->missionType = missionType;
+    entry->slotHint = slotHint;
+    copy_name(entry->templateIdentifier, sizeof(entry->templateIdentifier), templateIdentifier);
+    sMissionLoadoutEntryCount += 1;
+    return true;
+}
+
+bool game_content_add_mission_loot_entry(MissionType missionType, const char *templateIdentifier, float x, float y) {
+    MissionLootEntry *entry;
+
+    if (templateIdentifier == NULL || sMissionLootEntryCount >= kMaxMissionLootEntries) {
+        return false;
+    }
+
+    entry = &sMissionLootEntries[sMissionLootEntryCount];
+    memset(entry, 0, sizeof(*entry));
+    entry->active = true;
+    entry->missionType = missionType;
+    entry->position = vec2_make(x, y);
+    copy_name(entry->templateIdentifier, sizeof(entry->templateIdentifier), templateIdentifier);
+    sMissionLootEntryCount += 1;
+    return true;
+}
+
 static InventoryItem make_weapon(const char *name,
                                  WeaponClass weaponClass,
                                  AmmoType ammoType,
@@ -272,6 +426,177 @@ static WorldItem make_world_supply(const char *name,
 
 static WorldItem make_world_objective(const char *name, Vec2 position) {
     return make_world_supply(name, ItemKind_Objective, AmmoType_None, position, 1, 0, false);
+}
+
+static const ContentItemTemplate *find_content_item_template(const char *identifier) {
+    size_t index;
+
+    for (index = 0; index < sContentItemTemplateCount; index += 1) {
+        const ContentItemTemplate *itemTemplate = &sContentItemTemplates[index];
+        if (itemTemplate->active && identifier_matches(itemTemplate->identifier, identifier)) {
+            return itemTemplate;
+        }
+    }
+
+    return NULL;
+}
+
+static InventoryItem inventory_item_from_template(const ContentItemTemplate *itemTemplate) {
+    if (itemTemplate->kind == ItemKind_Gun || itemTemplate->kind == ItemKind_Blade) {
+        float range = itemTemplate->range > 0.0f
+            ? itemTemplate->range
+            : default_weapon_range(itemTemplate->weaponClass, itemTemplate->muzzleVelocity);
+
+        return make_weapon(itemTemplate->name,
+                           itemTemplate->weaponClass,
+                           itemTemplate->ammoType,
+                           itemTemplate->magazineCapacity,
+                           itemTemplate->roundsInMagazine,
+                           itemTemplate->damage,
+                           range,
+                           itemTemplate->suppressed,
+                           itemTemplate->recoil,
+                           itemTemplate->muzzleVelocity,
+                           itemTemplate->fireMode,
+                           itemTemplate->supportedFireModes,
+                           itemTemplate->supportsSuppressor,
+                           itemTemplate->supportsOptic,
+                           itemTemplate->opticMounted);
+    }
+
+    return make_support_item(itemTemplate->name,
+                             itemTemplate->kind,
+                             itemTemplate->ammoType,
+                             itemTemplate->quantity,
+                             itemTemplate->magazineCapacity);
+}
+
+static WorldItem world_item_from_template(const ContentItemTemplate *itemTemplate, Vec2 position) {
+    if (itemTemplate->kind == ItemKind_Gun || itemTemplate->kind == ItemKind_Blade) {
+        return make_world_weapon(itemTemplate->name,
+                                 itemTemplate->weaponClass,
+                                 itemTemplate->ammoType,
+                                 position,
+                                 itemTemplate->magazineCapacity,
+                                 itemTemplate->roundsInMagazine,
+                                 itemTemplate->damage,
+                                 itemTemplate->suppressed,
+                                 itemTemplate->recoil,
+                                 itemTemplate->muzzleVelocity,
+                                 itemTemplate->fireMode,
+                                 itemTemplate->supportedFireModes,
+                                 itemTemplate->supportsSuppressor,
+                                 itemTemplate->supportsOptic,
+                                 itemTemplate->opticMounted);
+    }
+
+    if (itemTemplate->kind == ItemKind_Objective) {
+        return make_world_objective(itemTemplate->name, position);
+    }
+
+    return make_world_supply(itemTemplate->name,
+                             itemTemplate->kind,
+                             itemTemplate->ammoType,
+                             position,
+                             itemTemplate->quantity,
+                             itemTemplate->magazineCapacity,
+                             itemTemplate->suppressed);
+}
+
+static void assign_inventory_slot(Player *player,
+                                  int inventoryIndex,
+                                  const ContentItemTemplate *itemTemplate,
+                                  LoadoutSlotHint slotHint) {
+    if (inventoryIndex < 0) {
+        return;
+    }
+
+    switch (slotHint) {
+        case LoadoutSlotHint_Primary:
+            player->primaryIndex = inventoryIndex;
+            return;
+        case LoadoutSlotHint_Secondary:
+            player->secondaryIndex = inventoryIndex;
+            return;
+        case LoadoutSlotHint_Melee:
+            player->meleeIndex = inventoryIndex;
+            return;
+        case LoadoutSlotHint_Gear:
+            return;
+        case LoadoutSlotHint_Auto:
+        default:
+            break;
+    }
+
+    if ((itemTemplate->weaponClass == WeaponClass_Rifle || itemTemplate->weaponClass == WeaponClass_Carbine) &&
+        player->primaryIndex < 0) {
+        player->primaryIndex = inventoryIndex;
+    } else if (itemTemplate->weaponClass == WeaponClass_Pistol && player->secondaryIndex < 0) {
+        player->secondaryIndex = inventoryIndex;
+    } else if (itemTemplate->weaponClass == WeaponClass_Knife && player->meleeIndex < 0) {
+        player->meleeIndex = inventoryIndex;
+    }
+}
+
+static void apply_mission_content(GameState *state, MissionType missionType) {
+    Player *player = &state->player;
+    size_t index;
+    int objectiveTarget = 0;
+
+    ensure_content_database_loaded();
+
+    for (index = 0; index < sMissionLoadoutEntryCount; index += 1) {
+        const MissionLoadoutEntry *entry = &sMissionLoadoutEntries[index];
+        const ContentItemTemplate *itemTemplate;
+        int inventoryIndex;
+
+        if (!entry->active || entry->missionType != missionType) {
+            continue;
+        }
+
+        itemTemplate = find_content_item_template(entry->templateIdentifier);
+        if (itemTemplate == NULL) {
+            continue;
+        }
+
+        inventoryIndex = add_inventory_item(player, inventory_item_from_template(itemTemplate));
+        assign_inventory_slot(player, inventoryIndex, itemTemplate, entry->slotHint);
+    }
+
+    if (player->selectedIndex < 0) {
+        if (player->primaryIndex >= 0) {
+            player->selectedIndex = player->primaryIndex;
+        } else if (player->secondaryIndex >= 0) {
+            player->selectedIndex = player->secondaryIndex;
+        } else if (player->meleeIndex >= 0) {
+            player->selectedIndex = player->meleeIndex;
+        } else if (player->inventoryCount > 0) {
+            player->selectedIndex = 0;
+        }
+    }
+
+    for (index = 0; index < sMissionLootEntryCount; index += 1) {
+        const MissionLootEntry *entry = &sMissionLootEntries[index];
+        const ContentItemTemplate *itemTemplate;
+
+        if (!entry->active || entry->missionType != missionType) {
+            continue;
+        }
+
+        itemTemplate = find_content_item_template(entry->templateIdentifier);
+        if (itemTemplate == NULL) {
+            continue;
+        }
+
+        add_world_item(state, world_item_from_template(itemTemplate, entry->position));
+        if (itemTemplate->kind == ItemKind_Objective) {
+            objectiveTarget += 1;
+        }
+    }
+
+    if (objectiveTarget > 0) {
+        state->objectiveTarget = objectiveTarget;
+    }
 }
 
 static int add_inventory_item(Player *player, InventoryItem item) {
@@ -1386,6 +1711,79 @@ static void update_enemies(GameState *state, float dt) {
     }
 }
 
+static void register_default_loadout_for_mission(MissionType missionType) {
+    game_content_add_mission_loadout_entry(missionType, "mk18_carbine", LoadoutSlotHint_Primary);
+    game_content_add_mission_loadout_entry(missionType, "m17_sidearm", LoadoutSlotHint_Secondary);
+    game_content_add_mission_loadout_entry(missionType, "field_knife", LoadoutSlotHint_Melee);
+}
+
+static void register_default_content(void) {
+    clear_content_database_internal();
+
+    game_content_add_item_template("mk18_carbine", "MK18 Carbine", ItemKind_Gun, AmmoType_556, WeaponClass_Carbine, 1, 30, 30, 32.0f, 780.0f, false, 0.055f, 960.0f, FireMode_Auto, fire_mode_mask(FireMode_Semi) | fire_mode_mask(FireMode_Auto), true, true, true);
+    game_content_add_item_template("m17_sidearm", "M17 Sidearm", ItemKind_Gun, AmmoType_9mm, WeaponClass_Pistol, 1, 17, 17, 20.0f, 520.0f, false, 0.042f, 700.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), true, false, false);
+    game_content_add_item_template("field_knife", "Field Knife", ItemKind_Blade, AmmoType_None, WeaponClass_Knife, 1, 0, 0, 52.0f, 70.0f, false, 0.0f, 0.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), false, false, false);
+    game_content_add_item_template("ammo_556_ball", "5.56 Ball", ItemKind_BulletBox, AmmoType_556, WeaponClass_None, 30, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("stanag_mag", "STANAG Magazine", ItemKind_Magazine, AmmoType_556, WeaponClass_None, 1, 30, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("ammo_9mm_mag", "9mm Magazine", ItemKind_Magazine, AmmoType_9mm, WeaponClass_None, 2, 17, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("threaded_suppressor", "Threaded Suppressor", ItemKind_Attachment, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, true, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("combat_gauze", "Combat Gauze", ItemKind_Medkit, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("recon_rifle", "Recon Rifle", ItemKind_Gun, AmmoType_556, WeaponClass_Rifle, 1, 20, 20, 42.0f, 900.0f, true, 0.034f, 1100.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), true, true, true);
+    game_content_add_item_template("vx9_carbine", "VX-9 Carbine", ItemKind_Gun, AmmoType_556, WeaponClass_Carbine, 1, 24, 24, 30.0f, 760.0f, false, 0.060f, 900.0f, FireMode_Burst, fire_mode_mask(FireMode_Semi) | fire_mode_mask(FireMode_Burst) | fire_mode_mask(FireMode_Auto), true, true, false);
+    game_content_add_item_template("suppressed_scout_rifle", "Suppressed Scout Rifle", ItemKind_Gun, AmmoType_556, WeaponClass_Rifle, 1, 20, 20, 44.0f, 920.0f, true, 0.030f, 1120.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), true, true, true);
+    game_content_add_item_template("breaching_knife", "Breaching Knife", ItemKind_Blade, AmmoType_None, WeaponClass_Knife, 1, 0, 0, 68.0f, 80.0f, false, 0.0f, 0.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), false, false, false);
+
+    game_content_add_item_template("cache_ledger", "Cache Ledger", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("firing_codes", "Firing Codes", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("hostage_beacon", "Hostage Beacon", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("observation_reel", "Observation Reel", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("radio_snapshot", "Radio Snapshot", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("convoy_manifest", "Convoy Manifest", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("crypto_tablet", "Crypto Tablet", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+
+    register_default_loadout_for_mission(MissionType_CacheRaid);
+    register_default_loadout_for_mission(MissionType_HostageRecovery);
+    register_default_loadout_for_mission(MissionType_ReconExfil);
+    register_default_loadout_for_mission(MissionType_ConvoyAmbush);
+
+    game_content_add_mission_loot_entry(MissionType_CacheRaid, "cache_ledger", 530.0f, 180.0f);
+    game_content_add_mission_loot_entry(MissionType_CacheRaid, "firing_codes", 860.0f, 460.0f);
+    game_content_add_mission_loot_entry(MissionType_CacheRaid, "ammo_556_ball", -860.0f, -440.0f);
+    game_content_add_mission_loot_entry(MissionType_CacheRaid, "stanag_mag", -440.0f, -250.0f);
+    game_content_add_mission_loot_entry(MissionType_CacheRaid, "threaded_suppressor", 210.0f, 20.0f);
+    game_content_add_mission_loot_entry(MissionType_CacheRaid, "recon_rifle", 760.0f, 380.0f);
+    game_content_add_mission_loot_entry(MissionType_CacheRaid, "combat_gauze", 960.0f, 420.0f);
+
+    game_content_add_mission_loot_entry(MissionType_HostageRecovery, "hostage_beacon", 420.0f, 260.0f);
+    game_content_add_mission_loot_entry(MissionType_HostageRecovery, "ammo_9mm_mag", -420.0f, 180.0f);
+    game_content_add_mission_loot_entry(MissionType_HostageRecovery, "ammo_556_ball", 80.0f, 120.0f);
+    game_content_add_mission_loot_entry(MissionType_HostageRecovery, "threaded_suppressor", 720.0f, 20.0f);
+    game_content_add_mission_loot_entry(MissionType_HostageRecovery, "vx9_carbine", 860.0f, -220.0f);
+    game_content_add_mission_loot_entry(MissionType_HostageRecovery, "combat_gauze", 520.0f, 320.0f);
+
+    game_content_add_mission_loot_entry(MissionType_ReconExfil, "observation_reel", 260.0f, -120.0f);
+    game_content_add_mission_loot_entry(MissionType_ReconExfil, "radio_snapshot", -40.0f, 420.0f);
+    game_content_add_mission_loot_entry(MissionType_ReconExfil, "ammo_556_ball", 720.0f, -520.0f);
+    game_content_add_mission_loot_entry(MissionType_ReconExfil, "ammo_9mm_mag", 220.0f, -40.0f);
+    game_content_add_mission_loot_entry(MissionType_ReconExfil, "suppressed_scout_rifle", -180.0f, 280.0f);
+    game_content_add_mission_loot_entry(MissionType_ReconExfil, "combat_gauze", -760.0f, 540.0f);
+    game_content_add_mission_loot_entry(MissionType_ReconExfil, "threaded_suppressor", 420.0f, 220.0f);
+
+    game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "convoy_manifest", 300.0f, 60.0f);
+    game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "crypto_tablet", -20.0f, 60.0f);
+    game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "ammo_556_ball", 920.0f, -120.0f);
+    game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "stanag_mag", 620.0f, -120.0f);
+    game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "ammo_9mm_mag", -300.0f, 220.0f);
+    game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "breaching_knife", -720.0f, 220.0f);
+    game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "combat_gauze", -860.0f, -220.0f);
+}
+
+static void ensure_content_database_loaded(void) {
+    if (sContentItemTemplateCount == 0) {
+        register_default_content();
+    }
+}
+
 static void setup_common_player(GameState *state, Vec2 startPosition) {
     Player *player = &state->player;
     player->position = startPosition;
@@ -1397,6 +1795,7 @@ static void setup_common_player(GameState *state, Vec2 startPosition) {
     player->hitTimer = 0.0f;
     player->noiseTimer = 0.0f;
     player->stance = Stance_Stand;
+    player->inventoryCount = 0;
     player->selectedIndex = -1;
     player->primaryIndex = -1;
     player->secondaryIndex = -1;
@@ -1406,56 +1805,7 @@ static void setup_common_player(GameState *state, Vec2 startPosition) {
     player->ammoShell = 0;
     player->burstShotsRemaining = 0;
     player->triggerHeldLastFrame = false;
-
-    player->primaryIndex = add_inventory_item(player,
-                                              make_weapon("MK18 Carbine",
-                                                          WeaponClass_Carbine,
-                                                          AmmoType_556,
-                                                          30,
-                                                          30,
-                                                          32.0f,
-                                                          780.0f,
-                                                          false,
-                                                          0.055f,
-                                                          960.0f,
-                                                          FireMode_Auto,
-                                                          fire_mode_mask(FireMode_Semi) | fire_mode_mask(FireMode_Auto),
-                                                          true,
-                                                          true,
-                                                          true));
-    player->secondaryIndex = add_inventory_item(player,
-                                                make_weapon("M17 Sidearm",
-                                                            WeaponClass_Pistol,
-                                                            AmmoType_9mm,
-                                                            17,
-                                                            17,
-                                                            20.0f,
-                                                            520.0f,
-                                                            false,
-                                                            0.042f,
-                                                            700.0f,
-                                                            FireMode_Semi,
-                                                            fire_mode_mask(FireMode_Semi),
-                                                            true,
-                                                            false,
-                                                            false));
-    player->meleeIndex = add_inventory_item(player,
-                                            make_weapon("Field Knife",
-                                                        WeaponClass_Knife,
-                                                        AmmoType_None,
-                                                        0,
-                                                        0,
-                                                        52.0f,
-                                                        70.0f,
-                                                        false,
-                                                        0.0f,
-                                                        0.0f,
-                                                        FireMode_Semi,
-                                                        fire_mode_mask(FireMode_Semi),
-                                                        false,
-                                                        false,
-                                                        false));
-    player->selectedIndex = player->primaryIndex;
+    memset(player->inventory, 0, sizeof(player->inventory));
 }
 
 static void setup_cache_raid(GameState *state) {
@@ -1480,28 +1830,6 @@ static void setup_cache_raid(GameState *state) {
     add_structure(state, StructureKind_LowWall, vec2_make(360.0f, 180.0f), vec2_make(24.0f, 220.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_LowWall, vec2_make(680.0f, 180.0f), vec2_make(24.0f, 220.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_Tower, vec2_make(860.0f, 460.0f), vec2_make(80.0f, 80.0f), 0.0f, true, true, false, false);
-
-    add_world_item(state, make_world_objective("Cache Ledger", vec2_make(530.0f, 180.0f)));
-    add_world_item(state, make_world_objective("Firing Codes", vec2_make(860.0f, 460.0f)));
-    add_world_item(state, make_world_supply("5.56 Ball", ItemKind_BulletBox, AmmoType_556, vec2_make(-860.0f, -440.0f), 30, 0, false));
-    add_world_item(state, make_world_supply("STANAG Magazine", ItemKind_Magazine, AmmoType_556, vec2_make(-440.0f, -250.0f), 1, 30, false));
-    add_world_item(state, make_world_supply("Threaded Suppressor", ItemKind_Attachment, AmmoType_None, vec2_make(210.0f, 20.0f), 1, 0, true));
-    add_world_item(state, make_world_weapon("Recon Rifle",
-                                            WeaponClass_Rifle,
-                                            AmmoType_556,
-                                            vec2_make(760.0f, 380.0f),
-                                            20,
-                                            20,
-                                            42.0f,
-                                            true,
-                                            0.034f,
-                                            1100.0f,
-                                            FireMode_Semi,
-                                            fire_mode_mask(FireMode_Semi),
-                                            true,
-                                            true,
-                                            true));
-    add_world_item(state, make_world_supply("Combat Gauze", ItemKind_Medkit, AmmoType_None, vec2_make(960.0f, 420.0f), 1, 0, false));
 
     add_interactable(state, InteractableKind_SupplyCrate, vec2_make(-900.0f, -430.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 60, 17, 10, "Landing zone crate");
     add_interactable(state, InteractableKind_DeadDrop, vec2_make(40.0f, 140.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 30, 0, 0, "hide-site satchel");
@@ -1538,27 +1866,6 @@ static void setup_hostage_recovery(GameState *state) {
     add_structure(state, StructureKind_TreeCluster, vec2_make(760.0f, -40.0f), vec2_make(210.0f, 200.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_Ridge, vec2_make(860.0f, -300.0f), vec2_make(280.0f, 140.0f), 0.0f, true, true, false, false);
 
-    add_world_item(state, make_world_objective("Hostage Beacon", vec2_make(420.0f, 260.0f)));
-    add_world_item(state, make_world_supply("9mm Magazine", ItemKind_Magazine, AmmoType_9mm, vec2_make(-420.0f, 180.0f), 2, 17, false));
-    add_world_item(state, make_world_supply("5.56 Ball", ItemKind_BulletBox, AmmoType_556, vec2_make(80.0f, 120.0f), 30, 0, false));
-    add_world_item(state, make_world_supply("Suppressor", ItemKind_Attachment, AmmoType_None, vec2_make(720.0f, 20.0f), 1, 0, true));
-    add_world_item(state, make_world_weapon("VX-9 Carbine",
-                                            WeaponClass_Carbine,
-                                            AmmoType_556,
-                                            vec2_make(860.0f, -220.0f),
-                                            24,
-                                            24,
-                                            30.0f,
-                                            false,
-                                            0.060f,
-                                            900.0f,
-                                            FireMode_Burst,
-                                            fire_mode_mask(FireMode_Semi) | fire_mode_mask(FireMode_Burst) | fire_mode_mask(FireMode_Auto),
-                                            true,
-                                            true,
-                                            false));
-    add_world_item(state, make_world_supply("Combat Gauze", ItemKind_Medkit, AmmoType_None, vec2_make(520.0f, 320.0f), 1, 0, false));
-
     add_interactable(state, InteractableKind_SupplyCrate, vec2_make(500.0f, 340.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 45, 34, 15, "aid-and-ammo crate");
     add_interactable(state, InteractableKind_DeadDrop, vec2_make(-660.0f, 340.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 0, 17, 0, "village dead drop");
     add_interactable(state, InteractableKind_Radio, vec2_make(760.0f, -40.0f), vec2_make(34.0f, 34.0f), 0.0f, -1, false, true, 0.0f, 0, 0, 0, "street relay");
@@ -1594,28 +1901,6 @@ static void setup_recon_exfil(GameState *state) {
     add_gate(state, vec2_make(120.0f, 10.0f), false, "Observation gate");
     add_structure(state, StructureKind_Road, vec2_make(-520.0f, 20.0f), vec2_make(720.0f, 76.0f), -0.15f, false, false, false, false);
 
-    add_world_item(state, make_world_objective("Observation Reel", vec2_make(260.0f, -120.0f)));
-    add_world_item(state, make_world_objective("Radio Snapshot", vec2_make(-40.0f, 420.0f)));
-    add_world_item(state, make_world_supply("5.56 Ball", ItemKind_BulletBox, AmmoType_556, vec2_make(720.0f, -520.0f), 30, 0, false));
-    add_world_item(state, make_world_supply("9mm Magazine", ItemKind_Magazine, AmmoType_9mm, vec2_make(220.0f, -40.0f), 2, 17, false));
-    add_world_item(state, make_world_weapon("Suppressed Scout Rifle",
-                                            WeaponClass_Rifle,
-                                            AmmoType_556,
-                                            vec2_make(-180.0f, 280.0f),
-                                            20,
-                                            20,
-                                            44.0f,
-                                            true,
-                                            0.030f,
-                                            1120.0f,
-                                            FireMode_Semi,
-                                            fire_mode_mask(FireMode_Semi),
-                                            true,
-                                            true,
-                                            true));
-    add_world_item(state, make_world_supply("Combat Gauze", ItemKind_Medkit, AmmoType_None, vec2_make(-760.0f, 540.0f), 1, 0, false));
-    add_world_item(state, make_world_supply("Threaded Suppressor", ItemKind_Attachment, AmmoType_None, vec2_make(420.0f, 220.0f), 1, 0, true));
-
     add_interactable(state, InteractableKind_SupplyCrate, vec2_make(-740.0f, 560.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 60, 17, 0, "concealed resupply crate");
     add_interactable(state, InteractableKind_DeadDrop, vec2_make(430.0f, 240.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 30, 17, 0, "treeline dead drop");
     add_interactable(state, InteractableKind_Radio, vec2_make(-20.0f, 460.0f), vec2_make(34.0f, 34.0f), 0.0f, -1, false, true, 0.0f, 0, 0, 0, "shack receiver");
@@ -1649,14 +1934,6 @@ static void setup_convoy_ambush(GameState *state) {
     add_structure(state, StructureKind_TreeCluster, vec2_make(860.0f, -220.0f), vec2_make(260.0f, 220.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_TreeCluster, vec2_make(-620.0f, 180.0f), vec2_make(260.0f, 220.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_Ridge, vec2_make(-840.0f, -220.0f), vec2_make(320.0f, 180.0f), 0.0f, true, true, false, false);
-
-    add_world_item(state, make_world_objective("Convoy Manifest", vec2_make(300.0f, 60.0f)));
-    add_world_item(state, make_world_objective("Crypto Tablet", vec2_make(-20.0f, 60.0f)));
-    add_world_item(state, make_world_supply("5.56 Ball", ItemKind_BulletBox, AmmoType_556, vec2_make(920.0f, -120.0f), 30, 0, false));
-    add_world_item(state, make_world_supply("STANAG Magazine", ItemKind_Magazine, AmmoType_556, vec2_make(620.0f, -120.0f), 1, 30, false));
-    add_world_item(state, make_world_supply("9mm Magazine", ItemKind_Magazine, AmmoType_9mm, vec2_make(-300.0f, 220.0f), 2, 17, false));
-    add_world_item(state, make_world_weapon("Breaching Knife", WeaponClass_Knife, AmmoType_None, vec2_make(-720.0f, 220.0f), 0, 0, 68.0f, false, 0.0f, 0.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), false, false, false));
-    add_world_item(state, make_world_supply("Combat Gauze", ItemKind_Medkit, AmmoType_None, vec2_make(-860.0f, -220.0f), 1, 0, false));
 
     add_interactable(state, InteractableKind_SupplyCrate, vec2_make(660.0f, -120.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 60, 17, 10, "convoy crate");
     add_interactable(state, InteractableKind_DeadDrop, vec2_make(-660.0f, 220.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 30, 17, 0, "fallback dead drop");
@@ -1699,6 +1976,7 @@ static void setup_mission(GameState *state, MissionType mission) {
             break;
     }
 
+    apply_mission_content(state, mission);
     set_event(state, state->missionBrief);
 }
 

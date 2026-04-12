@@ -73,6 +73,269 @@ struct HUDSnapshot {
     var failed = false
 }
 
+private struct ItemDefinitionsDocument: Decodable {
+    let items: [ItemDefinitionRecord]
+}
+
+private struct ItemDefinitionRecord: Decodable {
+    let id: String
+    let name: String
+    let kind: String
+    let ammoType: String?
+    let weaponClass: String?
+    let quantity: Int?
+    let magazineCapacity: Int?
+    let roundsInMagazine: Int?
+    let damage: Float?
+    let range: Float?
+    let suppressed: Bool?
+    let recoil: Float?
+    let muzzleVelocity: Float?
+    let fireMode: String?
+    let supportedFireModes: [String]?
+    let supportsSuppressor: Bool?
+    let supportsOptic: Bool?
+    let opticMounted: Bool?
+}
+
+private struct MissionLootTablesDocument: Decodable {
+    let loadouts: [MissionLoadoutRecord]
+    let lootTables: [MissionLootTableRecord]
+}
+
+private struct MissionLoadoutRecord: Decodable {
+    let mission: String
+    let items: [MissionLoadoutItemRecord]
+}
+
+private struct MissionLoadoutItemRecord: Decodable {
+    let template: String
+    let slot: String
+}
+
+private struct MissionLootTableRecord: Decodable {
+    let mission: String
+    let spawns: [MissionLootSpawnRecord]
+}
+
+private struct MissionLootSpawnRecord: Decodable {
+    let template: String
+    let x: Float
+    let y: Float
+}
+
+private enum GameContentBootstrap {
+    static let loadIntoEngine: Void = {
+        loadBundleContent()
+    }()
+
+    static func loadBundleContent() {
+        guard
+            let itemURL = Bundle.main.url(forResource: "ItemDefinitions", withExtension: "json"),
+            let lootURL = Bundle.main.url(forResource: "MissionLootTables", withExtension: "json")
+        else {
+            return
+        }
+
+        let decoder = JSONDecoder()
+
+        do {
+            let itemDocument = try decoder.decode(ItemDefinitionsDocument.self, from: Data(contentsOf: itemURL))
+            let missionDocument = try decoder.decode(MissionLootTablesDocument.self, from: Data(contentsOf: lootURL))
+            game_content_reset()
+
+            for item in itemDocument.items {
+                guard let kind = itemKind(for: item.kind) else {
+                    continue
+                }
+
+                let ammoType = ammoType(for: item.ammoType)
+                let weaponClass = weaponClass(for: item.weaponClass)
+                let fireMode = fireMode(for: item.fireMode)
+                let supportedFireModes = fireModeMask(item.supportedFireModes, fallback: fireMode)
+
+                withCStringPair(item.id, item.name) { identifierPointer, namePointer in
+                    _ = game_content_add_item_template(
+                        identifierPointer,
+                        namePointer,
+                        kind,
+                        ammoType,
+                        weaponClass,
+                        Int32(item.quantity ?? defaultQuantity(for: kind)),
+                        Int32(item.magazineCapacity ?? 0),
+                        Int32(item.roundsInMagazine ?? 0),
+                        item.damage ?? 0,
+                        item.range ?? 0,
+                        item.suppressed ?? false,
+                        item.recoil ?? 0,
+                        item.muzzleVelocity ?? 0,
+                        fireMode,
+                        supportedFireModes,
+                        item.supportsSuppressor ?? false,
+                        item.supportsOptic ?? false,
+                        item.opticMounted ?? false
+                    )
+                }
+            }
+
+            for loadout in missionDocument.loadouts {
+                guard let missionType = missionType(for: loadout.mission) else {
+                    continue
+                }
+
+                for item in loadout.items {
+                    item.template.withCString { templatePointer in
+                        _ = game_content_add_mission_loadout_entry(
+                            missionType,
+                            templatePointer,
+                            loadoutSlotHint(for: item.slot)
+                        )
+                    }
+                }
+            }
+
+            for lootTable in missionDocument.lootTables {
+                guard let missionType = missionType(for: lootTable.mission) else {
+                    continue
+                }
+
+                for spawn in lootTable.spawns {
+                    spawn.template.withCString { templatePointer in
+                        _ = game_content_add_mission_loot_entry(
+                            missionType,
+                            templatePointer,
+                            spawn.x,
+                            spawn.y
+                        )
+                    }
+                }
+            }
+        } catch {
+            print("Failed to load bundled mission content: \(error.localizedDescription)")
+        }
+    }
+
+    static func withCStringPair<Result>(_ first: String,
+                                        _ second: String,
+                                        body: (UnsafePointer<CChar>, UnsafePointer<CChar>) -> Result) -> Result {
+        first.withCString { firstPointer in
+            second.withCString { secondPointer in
+                body(firstPointer, secondPointer)
+            }
+        }
+    }
+
+    static func missionType(for rawValue: String) -> MissionType? {
+        switch rawValue.lowercased() {
+        case "cache_raid":
+            return MissionType_CacheRaid
+        case "hostage_recovery":
+            return MissionType_HostageRecovery
+        case "recon_exfil":
+            return MissionType_ReconExfil
+        case "convoy_ambush":
+            return MissionType_ConvoyAmbush
+        default:
+            return nil
+        }
+    }
+
+    static func itemKind(for rawValue: String) -> ItemKind? {
+        switch rawValue.lowercased() {
+        case "bullet_box":
+            return ItemKind_BulletBox
+        case "gun":
+            return ItemKind_Gun
+        case "magazine":
+            return ItemKind_Magazine
+        case "blade":
+            return ItemKind_Blade
+        case "attachment":
+            return ItemKind_Attachment
+        case "medkit":
+            return ItemKind_Medkit
+        case "objective":
+            return ItemKind_Objective
+        default:
+            return nil
+        }
+    }
+
+    static func ammoType(for rawValue: String?) -> AmmoType {
+        switch rawValue?.lowercased() {
+        case "556":
+            return AmmoType_556
+        case "9mm":
+            return AmmoType_9mm
+        case "shell":
+            return AmmoType_Shell
+        default:
+            return AmmoType_None
+        }
+    }
+
+    static func weaponClass(for rawValue: String?) -> WeaponClass {
+        switch rawValue?.lowercased() {
+        case "rifle":
+            return WeaponClass_Rifle
+        case "carbine":
+            return WeaponClass_Carbine
+        case "pistol":
+            return WeaponClass_Pistol
+        case "knife":
+            return WeaponClass_Knife
+        default:
+            return WeaponClass_None
+        }
+    }
+
+    static func fireMode(for rawValue: String?) -> FireMode {
+        switch rawValue?.lowercased() {
+        case "burst":
+            return FireMode_Burst
+        case "auto":
+            return FireMode_Auto
+        default:
+            return FireMode_Semi
+        }
+    }
+
+    static func loadoutSlotHint(for rawValue: String) -> LoadoutSlotHint {
+        switch rawValue.lowercased() {
+        case "primary":
+            return LoadoutSlotHint_Primary
+        case "secondary":
+            return LoadoutSlotHint_Secondary
+        case "melee":
+            return LoadoutSlotHint_Melee
+        case "gear":
+            return LoadoutSlotHint_Gear
+        default:
+            return LoadoutSlotHint_Auto
+        }
+    }
+
+    static func fireModeMask(_ rawModes: [String]?, fallback: FireMode) -> UInt32 {
+        guard let rawModes, !rawModes.isEmpty else {
+            return 1 << UInt32(fallback.rawValue)
+        }
+
+        return rawModes.reduce(0) { partialResult, rawValue in
+            let mode = fireMode(for: rawValue)
+            return partialResult | (1 << UInt32(mode.rawValue))
+        }
+    }
+
+    static func defaultQuantity(for kind: ItemKind) -> Int {
+        switch kind {
+        case ItemKind_BulletBox, ItemKind_Magazine:
+            return 1
+        default:
+            return 1
+        }
+    }
+}
+
 final class GameViewModel: ObservableObject {
     @Published private(set) var hud = HUDSnapshot()
 
@@ -81,6 +344,7 @@ final class GameViewModel: ObservableObject {
     private var mapExpanded = true
 
     init() {
+        _ = GameContentBootstrap.loadIntoEngine
         game_init(&state)
         refreshHUD(force: true)
     }
@@ -440,7 +704,7 @@ final class GameViewModel: ObservableObject {
             }
 
             bestDistance = distance
-                hint = "Use F to recover \(string(fromTuple: item.name))."
+            hint = "Use F to recover \(string(fromTuple: item.name))."
         }
 
         return hint

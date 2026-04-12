@@ -1,0 +1,85 @@
+{
+  "loadouts": [
+    {
+      "mission": "cache_raid",
+      "items": [
+        { "template": "mk18_carbine", "slot": "primary" },
+        { "template": "m17_sidearm", "slot": "secondary" },
+        { "template": "field_knife", "slot": "melee" }
+      ]
+    },
+    {
+      "mission": "hostage_recovery",
+      "items": [
+        { "template": "mk18_carbine", "slot": "primary" },
+        { "template": "m17_sidearm", "slot": "secondary" },
+        { "template": "field_knife", "slot": "melee" }
+      ]
+    },
+    {
+      "mission": "recon_exfil",
+      "items": [
+        { "template": "mk18_carbine", "slot": "primary" },
+        { "template": "m17_sidearm", "slot": "secondary" },
+        { "template": "field_knife", "slot": "melee" }
+      ]
+    },
+    {
+      "mission": "convoy_ambush",
+      "items": [
+        { "template": "mk18_carbine", "slot": "primary" },
+        { "template": "m17_sidearm", "slot": "secondary" },
+        { "template": "field_knife", "slot": "melee" }
+      ]
+    }
+  ],
+  "lootTables": [
+    {
+      "mission": "cache_raid",
+      "spawns": [
+        { "template": "cache_ledger", "x": 530, "y": 180 },
+        { "template": "firing_codes", "x": 860, "y": 460 },
+        { "template": "ammo_556_ball", "x": -860, "y": -440 },
+        { "template": "stanag_mag", "x": -440, "y": -250 },
+        { "template": "threaded_suppressor", "x": 210, "y": 20 },
+        { "template": "recon_rifle", "x": 760, "y": 380 },
+        { "template": "combat_gauze", "x": 960, "y": 420 }
+      ]
+    },
+    {
+      "mission": "hostage_recovery",
+      "spawns": [
+        { "template": "hostage_beacon", "x": 420, "y": 260 },
+        { "template": "ammo_9mm_mag", "x": -420, "y": 180 },
+        { "template": "ammo_556_ball", "x": 80, "y": 120 },
+        { "template": "threaded_suppressor", "x": 720, "y": 20 },
+        { "template": "vx9_carbine", "x": 860, "y": -220 },
+        { "template": "combat_gauze", "x": 520, "y": 320 }
+      ]
+    },
+    {
+      "mission": "recon_exfil",
+      "spawns": [
+        { "template": "observation_reel", "x": 260, "y": -120 },
+        { "template": "radio_snapshot", "x": -40, "y": 420 },
+        { "template": "ammo_556_ball", "x": 720, "y": -520 },
+        { "template": "ammo_9mm_mag", "x": 220, "y": -40 },
+        { "template": "suppressed_scout_rifle", "x": -180, "y": 280 },
+        { "template": "combat_gauze", "x": -760, "y": 540 },
+        { "template": "threaded_suppressor", "x": 420, "y": 220 }
+      ]
+    },
+    {
+      "mission": "convoy_ambush",
+      "spawns": [
+        { "template": "convoy_manifest", "x": 300, "y": 60 },
+        { "template": "crypto_tablet", "x": -20, "y": 60 },
+        { "template": "ammo_556_ball", "x": 920, "y": -120 },
+        { "template": "stanag_mag", "x": 620, "y": -120 },
+        { "template": "ammo_9mm_mag", "x": -300, "y": 220 },
+        { "template": "breaching_knife", "x": -720, "y": 220 },
+        { "template": "combat_gauze", "x": -860, "y": -220 }
+      ]
+    }
+  ]
+}

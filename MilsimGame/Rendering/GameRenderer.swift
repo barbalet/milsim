@@ -36,6 +36,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     private var lastFrameTime: CFTimeInterval?
     private let maxInstances = 1400
 
+    @MainActor
     init(view: MTKView, viewModel: GameViewModel, inputController: InputController) {
         self.device = view.device!
         self.viewModel = viewModel

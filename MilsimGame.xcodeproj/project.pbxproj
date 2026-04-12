@@ -15,6 +15,8 @@
 		A10000010000000000000006 /* GameRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000006 /* GameRenderer.swift */; };
 		A10000010000000000000007 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000007 /* Shaders.metal */; };
 		A10000010000000000000008 /* engine.c in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000009 /* engine.c */; };
+		A10000010000000000000009 /* ItemDefinitions.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000014 /* ItemDefinitions.json */; };
+		A10000010000000000000010 /* MissionLootTables.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000015 /* MissionLootTables.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +34,8 @@
 		B10000010000000000000011 /* MilsimGame-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MilsimGame-Bridging-Header.h"; sourceTree = "<group>"; };
 		B10000010000000000000012 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		B10000010000000000000013 /* plan.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = plan.md; sourceTree = "<group>"; };
+		B10000010000000000000014 /* ItemDefinitions.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ItemDefinitions.json; sourceTree = "<group>"; };
+		B10000010000000000000015 /* MissionLootTables.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = MissionLootTables.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -63,6 +67,7 @@
 				C10000010000000000000004 /* UI */,
 				C10000010000000000000005 /* Rendering */,
 				C10000010000000000000006 /* Engine */,
+				C10000010000000000000007 /* Content */,
 				B10000010000000000000010 /* Info.plist */,
 				B10000010000000000000011 /* MilsimGame-Bridging-Header.h */,
 			);
@@ -103,6 +108,15 @@
 				B10000010000000000000008 /* engine.h */,
 			);
 			path = Engine;
+			sourceTree = "<group>";
+		};
+		C10000010000000000000007 /* Content */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000014 /* ItemDefinitions.json */,
+				B10000010000000000000015 /* MissionLootTables.json */,
+			);
+			path = Content;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -163,6 +177,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000010000000000000009 /* ItemDefinitions.json in Resources */,
+				A10000010000000000000010 /* MissionLootTables.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -299,4 +315,3 @@
 	};
 	rootObject = F10000010000000000000001 /* Project object */;
 }
-

@@ -95,6 +95,14 @@ typedef enum InteractableKind {
     InteractableKind_EmplacedWeapon = 5
 } InteractableKind;
 
+typedef enum LoadoutSlotHint {
+    LoadoutSlotHint_Auto = 0,
+    LoadoutSlotHint_Primary = 1,
+    LoadoutSlotHint_Secondary = 2,
+    LoadoutSlotHint_Melee = 3,
+    LoadoutSlotHint_Gear = 4
+} LoadoutSlotHint;
+
 typedef struct Vec2 {
     float x;
     float y;
@@ -277,6 +285,28 @@ void game_cycle_weapon(GameState *state, int direction);
 void game_select_primary(GameState *state);
 void game_select_secondary(GameState *state);
 void game_select_melee(GameState *state);
+
+void game_content_reset(void);
+bool game_content_add_item_template(const char *identifier,
+                                    const char *name,
+                                    ItemKind kind,
+                                    AmmoType ammoType,
+                                    WeaponClass weaponClass,
+                                    int quantity,
+                                    int magazineCapacity,
+                                    int roundsInMagazine,
+                                    float damage,
+                                    float range,
+                                    bool suppressed,
+                                    float recoil,
+                                    float muzzleVelocity,
+                                    FireMode fireMode,
+                                    unsigned int supportedFireModes,
+                                    bool supportsSuppressor,
+                                    bool supportsOptic,
+                                    bool opticMounted);
+bool game_content_add_mission_loadout_entry(MissionType missionType, const char *templateIdentifier, LoadoutSlotHint slotHint);
+bool game_content_add_mission_loot_entry(MissionType missionType, const char *templateIdentifier, float x, float y);
 
 size_t game_collection_target(void);
 float game_world_half_width(void);
