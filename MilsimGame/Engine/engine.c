@@ -57,9 +57,20 @@ typedef struct MissionLootEntry {
     Vec2 position;
 } MissionLootEntry;
 
+typedef struct MissionScriptDefinition {
+    bool active;
+    char name[32];
+    char brief[GAME_EVENT_LENGTH];
+    char initialEvent[GAME_EVENT_LENGTH];
+    char quietReport[GAME_EVENT_LENGTH];
+    char clearReport[GAME_EVENT_LENGTH];
+    char interceptCallsign[24];
+} MissionScriptDefinition;
+
 static ContentItemTemplate sContentItemTemplates[kMaxContentItemTemplates];
 static MissionLoadoutEntry sMissionLoadoutEntries[kMaxMissionLoadoutEntries];
 static MissionLootEntry sMissionLootEntries[kMaxMissionLootEntries];
+static MissionScriptDefinition sMissionScripts[MissionType_Count];
 static size_t sContentItemTemplateCount = 0;
 static size_t sMissionLoadoutEntryCount = 0;
 static size_t sMissionLootEntryCount = 0;
@@ -80,6 +91,8 @@ static int nearest_navigation_node(const GameState *state, Vec2 position);
 static void update_command_route(GameState *state);
 static void update_discovery(GameState *state);
 static void update_radio_report(GameState *state, float dt);
+static const MissionScriptDefinition *mission_script_for(MissionType missionType);
+static void apply_mission_script(GameState *state, MissionType missionType);
 
 static float clampf(float value, float minimum, float maximum) {
     if (value < minimum) {
@@ -155,6 +168,31 @@ static void copy_name(char *destination, size_t destinationCount, const char *so
 
 static void set_event(GameState *state, const char *event) {
     copy_name(state->lastEvent, sizeof(state->lastEvent), event);
+}
+
+static const MissionScriptDefinition *mission_script_for(MissionType missionType) {
+    if (missionType < MissionType_CacheRaid || missionType >= MissionType_Count) {
+        return NULL;
+    }
+    if (!sMissionScripts[missionType].active) {
+        return NULL;
+    }
+    return &sMissionScripts[missionType];
+}
+
+static void apply_mission_script(GameState *state, MissionType missionType) {
+    const MissionScriptDefinition *script = mission_script_for(missionType);
+
+    if (script == NULL) {
+        return;
+    }
+
+    if (script->name[0] != '\0') {
+        copy_name(state->missionName, sizeof(state->missionName), script->name);
+    }
+    if (script->brief[0] != '\0') {
+        copy_name(state->missionBrief, sizeof(state->missionBrief), script->brief);
+    }
 }
 
 static unsigned int fire_mode_mask(FireMode mode) {
@@ -234,6 +272,7 @@ static void clear_content_database_internal(void) {
     memset(sContentItemTemplates, 0, sizeof(sContentItemTemplates));
     memset(sMissionLoadoutEntries, 0, sizeof(sMissionLoadoutEntries));
     memset(sMissionLootEntries, 0, sizeof(sMissionLootEntries));
+    memset(sMissionScripts, 0, sizeof(sMissionScripts));
     sContentItemTemplateCount = 0;
     sMissionLoadoutEntryCount = 0;
     sMissionLootEntryCount = 0;
@@ -323,6 +362,45 @@ bool game_content_add_mission_loot_entry(MissionType missionType, const char *te
     entry->position = vec2_make(x, y);
     copy_name(entry->templateIdentifier, sizeof(entry->templateIdentifier), templateIdentifier);
     sMissionLootEntryCount += 1;
+    return true;
+}
+
+bool game_content_set_mission_script(MissionType missionType,
+                                     const char *name,
+                                     const char *brief,
+                                     const char *initialEvent,
+                                     const char *quietReport,
+                                     const char *clearReport,
+                                     const char *interceptCallsign) {
+    MissionScriptDefinition *script;
+
+    if (missionType < MissionType_CacheRaid || missionType >= MissionType_Count) {
+        return false;
+    }
+
+    script = &sMissionScripts[missionType];
+    memset(script, 0, sizeof(*script));
+    script->active = true;
+
+    if (name != NULL) {
+        copy_name(script->name, sizeof(script->name), name);
+    }
+    if (brief != NULL) {
+        copy_name(script->brief, sizeof(script->brief), brief);
+    }
+    if (initialEvent != NULL) {
+        copy_name(script->initialEvent, sizeof(script->initialEvent), initialEvent);
+    }
+    if (quietReport != NULL) {
+        copy_name(script->quietReport, sizeof(script->quietReport), quietReport);
+    }
+    if (clearReport != NULL) {
+        copy_name(script->clearReport, sizeof(script->clearReport), clearReport);
+    }
+    if (interceptCallsign != NULL) {
+        copy_name(script->interceptCallsign, sizeof(script->interceptCallsign), interceptCallsign);
+    }
+
     return true;
 }
 
@@ -952,13 +1030,19 @@ static int choose_patrol_target_node(const GameState *state, int currentNodeInde
 static void update_radio_report(GameState *state, float dt) {
     char fromGrid[8];
     char toGrid[8];
+    const MissionScriptDefinition *script = mission_script_for(state->missionType);
+    const char *callsign = (script != NULL && script->interceptCallsign[0] != '\0') ? script->interceptCallsign : "Intercept";
     Enemy *reportEnemy = NULL;
     size_t index;
 
     state->radioReportCooldown = clampf(state->radioReportCooldown - dt, 0.0f, 600.0f);
 
     if (!state->radioIntelUnlocked) {
-        copy_name(state->radioReport, sizeof(state->radioReport), "Command net quiet. Recover a radio to pull hostile traffic.");
+        if (script != NULL && script->quietReport[0] != '\0') {
+            copy_name(state->radioReport, sizeof(state->radioReport), script->quietReport);
+        } else {
+            copy_name(state->radioReport, sizeof(state->radioReport), "Command net quiet. Recover a radio to pull hostile traffic.");
+        }
         return;
     }
 
@@ -974,7 +1058,11 @@ static void update_radio_report(GameState *state, float dt) {
     }
 
     if (reportEnemy == NULL) {
-        copy_name(state->radioReport, sizeof(state->radioReport), "Command net clear. No hostile transmitters are active.");
+        if (script != NULL && script->clearReport[0] != '\0') {
+            copy_name(state->radioReport, sizeof(state->radioReport), script->clearReport);
+        } else {
+            copy_name(state->radioReport, sizeof(state->radioReport), "Command net clear. No hostile transmitters are active.");
+        }
         state->radioReportCooldown = 5.0f;
         return;
     }
@@ -985,13 +1073,15 @@ static void update_radio_report(GameState *state, float dt) {
         grid_reference_for_position(state->navigationNodes[reportEnemy->targetNavNode].position, toGrid, sizeof(toGrid));
         snprintf(state->radioReport,
                  sizeof(state->radioReport),
-                 "Intercept: patrol shifting from %s toward %s.",
+                 "%s: patrol shifting from %s toward %s.",
+                 callsign,
                  fromGrid,
                  toGrid);
     } else {
         snprintf(state->radioReport,
                  sizeof(state->radioReport),
-                 "Intercept: hostile chatter centered on sector %s.",
+                 "%s: hostile chatter centered on sector %s.",
+                 callsign,
                  fromGrid);
     }
 
@@ -2484,6 +2574,8 @@ static void setup_convoy_ambush(GameState *state) {
 }
 
 static void setup_mission(GameState *state, MissionType mission) {
+    const MissionScriptDefinition *script;
+
     memset(state, 0, sizeof(*state));
     state->missionType = mission;
     state->objectiveCount = 0;
@@ -2513,10 +2605,16 @@ static void setup_mission(GameState *state, MissionType mission) {
     }
 
     apply_mission_content(state, mission);
+    apply_mission_script(state, mission);
     update_command_route(state);
     update_discovery(state);
     update_radio_report(state, 0.0f);
-    set_event(state, state->missionBrief);
+    script = mission_script_for(mission);
+    if (script != NULL && script->initialEvent[0] != '\0') {
+        set_event(state, script->initialEvent);
+    } else {
+        set_event(state, state->missionBrief);
+    }
 }
 
 void game_init(GameState *state) {
@@ -2530,6 +2628,26 @@ void game_restart(GameState *state) {
 void game_next_mission(GameState *state) {
     sMissionCursor = (MissionType) ((sMissionCursor + 1) % MissionType_Count);
     setup_mission(state, sMissionCursor);
+}
+
+void game_set_mission_cursor(MissionType missionType) {
+    if (missionType < MissionType_CacheRaid || missionType >= MissionType_Count) {
+        sMissionCursor = MissionType_CacheRaid;
+        return;
+    }
+    sMissionCursor = missionType;
+}
+
+void game_refresh_loaded_state(GameState *state) {
+    if (state == NULL) {
+        return;
+    }
+
+    apply_mission_script(state, state->missionType);
+    update_command_route(state);
+    update_discovery(state);
+    state->radioReportCooldown = 0.0f;
+    update_radio_report(state, 0.0f);
 }
 
 void game_reset_input(InputState *input) {

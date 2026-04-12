@@ -23,6 +23,16 @@ struct MilsimGameApp: App {
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
+                Button("Save Campaign") {
+                    viewModel.saveCampaign()
+                }
+                .keyboardShortcut("s", modifiers: [.command])
+
+                Button("Load Campaign") {
+                    _ = viewModel.loadCampaign()
+                }
+                .keyboardShortcut("l", modifiers: [.command])
+
                 Button("Next Operation") {
                     viewModel.nextMission()
                 }

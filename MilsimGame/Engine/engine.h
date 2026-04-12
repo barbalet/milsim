@@ -332,6 +332,15 @@ bool game_content_add_item_template(const char *identifier,
                                     bool opticMounted);
 bool game_content_add_mission_loadout_entry(MissionType missionType, const char *templateIdentifier, LoadoutSlotHint slotHint);
 bool game_content_add_mission_loot_entry(MissionType missionType, const char *templateIdentifier, float x, float y);
+bool game_content_set_mission_script(MissionType missionType,
+                                     const char *name,
+                                     const char *brief,
+                                     const char *initialEvent,
+                                     const char *quietReport,
+                                     const char *clearReport,
+                                     const char *interceptCallsign);
+void game_set_mission_cursor(MissionType missionType);
+void game_refresh_loaded_state(GameState *state);
 
 size_t game_collection_target(void);
 float game_world_half_width(void);

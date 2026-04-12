@@ -15,6 +15,8 @@ struct HUDOverlayView: View {
     let hud: HUDSnapshot
     let onRestart: () -> Void
     let onNextMission: () -> Void
+    let onSaveCampaign: () -> Void
+    let onLoadCampaign: () -> Void
     let onToggleFullScreen: () -> Void
     let onToggleMap: () -> Void
 
@@ -94,6 +96,7 @@ struct HUDOverlayView: View {
                         Text("C crouch   Z prone   Q/E lean")
                         Text("Tab or wheel cycle   1 2 3 select")
                         Text("M tactical map   Ctrl+Cmd+F full screen")
+                        Text("Cmd+S save campaign   Cmd+L load campaign")
                     }
                     .frame(width: 300, alignment: .leading)
 
@@ -111,13 +114,25 @@ struct HUDOverlayView: View {
                             }
                         }
 
+                        Text(hud.campaignStatus)
+                            .foregroundStyle(HUDPalette.blue.opacity(0.92))
+                            .padding(.top, 6)
+                        Text(hud.saveStatus)
+                            .foregroundStyle(HUDPalette.green.opacity(0.9))
+
+                        HStack(spacing: 10) {
+                            Button("Save", action: onSaveCampaign)
+                            Button("Load", action: onLoadCampaign)
+                        }
+                        .buttonStyle(HUDButtonStyle())
+                        .padding(.top, 8)
+
                         HStack(spacing: 10) {
                             Button("Restart", action: onRestart)
                             Button("Next Op", action: onNextMission)
                             Button("Full Screen", action: onToggleFullScreen)
                         }
                         .buttonStyle(HUDButtonStyle())
-                        .padding(.top, 8)
                     }
                     .frame(maxWidth: 500, alignment: .leading)
                 }

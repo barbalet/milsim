@@ -1,0 +1,40 @@
+{
+  "missions": [
+    {
+      "mission": "cache_raid",
+      "name": "Cache Raid",
+      "brief": "Ridge infil. Breach the north gate, strip the cache, sweep the relay, and exfil east.",
+      "initialEvent": "Raven Actual: ridge infil is live. Cut the gate, recover both packages, and stay light.",
+      "quietReport": "Raven net quiet. Recover the relay to build a hostile picture.",
+      "clearReport": "Raven net clear. No active patrol traffic remains on this objective.",
+      "interceptCallsign": "Raven"
+    },
+    {
+      "mission": "hostage_recovery",
+      "name": "Hostage Recovery",
+      "brief": "Push the village blocks, breach the safehouse, pull the beacon, and clear the south road.",
+      "initialEvent": "Viper Actual: move block to block, breach the safehouse, then drag the route south.",
+      "quietReport": "Viper net dark. Tap the street relay to expose the safehouse screen.",
+      "clearReport": "Viper net clear. The village search net has gone cold.",
+      "interceptCallsign": "Viper"
+    },
+    {
+      "mission": "recon_exfil",
+      "name": "Recon & Exfil",
+      "brief": "Skirt the treeline, recover the ridge package, probe the shack net, and ghost north.",
+      "initialEvent": "Ghost Lead: stay quiet, fill the map, lift both packages, then fade to the north tree line.",
+      "quietReport": "Ghost net quiet. Recover a receiver to surface the patrol pattern.",
+      "clearReport": "Ghost net clear. No active search teams are transmitting.",
+      "interceptCallsign": "Ghost"
+    },
+    {
+      "mission": "convoy_ambush",
+      "name": "Convoy Ambush",
+      "brief": "Break the convoy, pull the manifest and tablet, raid the fallback cache, and peel west.",
+      "initialEvent": "Jackal Actual: break the road column, seize the cargo, then disappear through the west trees.",
+      "quietReport": "Jackal net quiet. Recover the convoy radio to track fallback movement.",
+      "clearReport": "Jackal net clear. Convoy survivors are off the air.",
+      "interceptCallsign": "Jackal"
+    }
+  ]
+}

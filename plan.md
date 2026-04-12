@@ -48,6 +48,12 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - The environment now contributes more to route choice and information gathering instead of serving as a flat combat board.
 - Residual follow-up: tune the new route graph density per mission and deepen terrain-height effects during detection and firefights.
 
+### Persistence Foundations Added
+
+- Added bundled mission scripts so operation names, briefs, opening orders, and radio chatter can be authored from JSON instead of being hardwired in the C setup functions.
+- Added campaign save/load support that archives the live `GameState`, current mission, tactical-map state, and cross-operation progress to disk.
+- Added SwiftUI HUD and menu-bar controls for manual save/load so the prototype can be resumed between development sessions.
+
 ## Cycle 0: Foundation and Playable Slice
 
 - Deliver a bootable macOS app with SwiftUI shell, Metal renderer, and C engine.
@@ -129,6 +135,6 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Introduce mission scripting hooks and save/load support.
 - Begin Cycle 3 work on damage states, wound treatment, and fuller ballistic tradeoffs.
 - Add chamber-aware reload states, suppression effects, and first-pass wound treatment.
+- Expand mission scripting into branching triggers, authored objective phases, and richer campaign slots.

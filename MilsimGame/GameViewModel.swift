@@ -72,6 +72,8 @@ struct HUDSnapshot {
     var radioReport = ""
     var routeSummary = ""
     var interactionHint = ""
+    var campaignStatus = ""
+    var saveStatus = ""
     var worldHalfSize = SIMD2<Float>(1400, 980)
     var mapExpanded = true
     var mapTiles: [TacticalMapTile] = []
@@ -133,12 +135,96 @@ private struct MissionLootSpawnRecord: Decodable {
     let y: Float
 }
 
+private struct MissionScriptsDocument: Decodable {
+    let missions: [MissionScriptRecord]
+}
+
+private struct MissionScriptRecord: Decodable {
+    let mission: String
+    let name: String?
+    let brief: String?
+    let initialEvent: String?
+    let quietReport: String?
+    let clearReport: String?
+    let interceptCallsign: String?
+}
+
+private struct MissionCampaignStats: Codable {
+    var attempts = 0
+    var completions = 0
+    var bestTimeSeconds: Int?
+    var bestKills = 0
+    var bestLoot = 0
+    var intelRecovered = false
+}
+
+private struct CampaignProgress: Codable {
+    var completedMissions: [String] = []
+    var missionStats: [String: MissionCampaignStats] = [:]
+    var lastResult = "No operation archived yet."
+}
+
+private struct CampaignSaveEnvelope: Codable {
+    let version: Int
+    let savedAt: Date
+    let mapExpanded: Bool
+    let mission: String
+    let campaign: CampaignProgress
+    let stateSize: Int
+    let stateBlob: Data
+}
+
+private enum CampaignStore {
+    static let version = 1
+
+    static var saveURL: URL {
+        let fileManager = FileManager.default
+        let supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return supportURL
+            .appendingPathComponent("MilsimGame", isDirectory: true)
+            .appendingPathComponent("CampaignSave.json", isDirectory: false)
+    }
+
+    static func load() throws -> CampaignSaveEnvelope {
+        let data = try Data(contentsOf: saveURL)
+        return try JSONDecoder().decode(CampaignSaveEnvelope.self, from: data)
+    }
+
+    static func save(_ envelope: CampaignSaveEnvelope) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(envelope)
+        let directoryURL = saveURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        try data.write(to: saveURL, options: .atomic)
+    }
+}
+
+private enum CampaignSaveError: LocalizedError {
+    case invalidVersion(Int)
+    case invalidStateSize(expected: Int, actual: Int)
+    case invalidMission(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidVersion(let version):
+            return "Unsupported campaign save version \(version)."
+        case .invalidStateSize(let expected, let actual):
+            return "Save data size mismatch (\(actual) bytes, expected \(expected))."
+        case .invalidMission(let mission):
+            return "Save file references an unknown mission '\(mission)'."
+        }
+    }
+}
+
 private enum GameContentBootstrap {
     static let loadIntoEngine: Void = {
         loadBundleContent()
     }()
 
     static func loadBundleContent() {
+        let scriptURL = Bundle.main.url(forResource: "MissionScripts", withExtension: "json")
         guard
             let itemURL = Bundle.main.url(forResource: "ItemDefinitions", withExtension: "json"),
             let lootURL = Bundle.main.url(forResource: "MissionLootTables", withExtension: "json")
@@ -151,6 +237,7 @@ private enum GameContentBootstrap {
         do {
             let itemDocument = try decoder.decode(ItemDefinitionsDocument.self, from: Data(contentsOf: itemURL))
             let missionDocument = try decoder.decode(MissionLootTablesDocument.self, from: Data(contentsOf: lootURL))
+            let scriptDocument = try scriptURL.map { try decoder.decode(MissionScriptsDocument.self, from: Data(contentsOf: $0)) }
             game_content_reset()
 
             for item in itemDocument.items {
@@ -219,6 +306,36 @@ private enum GameContentBootstrap {
                     }
                 }
             }
+
+            if let scriptDocument {
+                for script in scriptDocument.missions {
+                    guard let missionType = missionType(for: script.mission) else {
+                        continue
+                    }
+
+                    withOptionalCString7(script.name,
+                                         script.brief,
+                                         script.initialEvent,
+                                         script.quietReport,
+                                         script.clearReport,
+                                         script.interceptCallsign) { namePointer,
+                        briefPointer,
+                        initialEventPointer,
+                        quietReportPointer,
+                        clearReportPointer,
+                        interceptCallsignPointer in
+                            _ = game_content_set_mission_script(
+                                missionType,
+                                namePointer,
+                                briefPointer,
+                                initialEventPointer,
+                                quietReportPointer,
+                                clearReportPointer,
+                                interceptCallsignPointer
+                            )
+                    }
+                }
+            }
         } catch {
             print("Failed to load bundled mission content: \(error.localizedDescription)")
         }
@@ -234,6 +351,47 @@ private enum GameContentBootstrap {
         }
     }
 
+    static func withOptionalCString7<Result>(_ first: String?,
+                                             _ second: String?,
+                                             _ third: String?,
+                                             _ fourth: String?,
+                                             _ fifth: String?,
+                                             _ sixth: String?,
+                                             body: (UnsafePointer<CChar>?,
+                                                    UnsafePointer<CChar>?,
+                                                    UnsafePointer<CChar>?,
+                                                    UnsafePointer<CChar>?,
+                                                    UnsafePointer<CChar>?,
+                                                    UnsafePointer<CChar>?) -> Result) -> Result {
+        withOptionalCString(first) { firstPointer in
+            withOptionalCString(second) { secondPointer in
+                withOptionalCString(third) { thirdPointer in
+                    withOptionalCString(fourth) { fourthPointer in
+                        withOptionalCString(fifth) { fifthPointer in
+                            withOptionalCString(sixth) { sixthPointer in
+                                body(firstPointer,
+                                     secondPointer,
+                                     thirdPointer,
+                                     fourthPointer,
+                                     fifthPointer,
+                                     sixthPointer)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    static func withOptionalCString<Result>(_ string: String?,
+                                            body: (UnsafePointer<CChar>?) -> Result) -> Result {
+        guard let string else {
+            return body(nil)
+        }
+
+        return string.withCString { body($0) }
+    }
+
     static func missionType(for rawValue: String) -> MissionType? {
         switch rawValue.lowercased() {
         case "cache_raid":
@@ -246,6 +404,21 @@ private enum GameContentBootstrap {
             return MissionType_ConvoyAmbush
         default:
             return nil
+        }
+    }
+
+    static func missionKey(for missionType: MissionType) -> String {
+        switch missionType {
+        case MissionType_CacheRaid:
+            return "cache_raid"
+        case MissionType_HostageRecovery:
+            return "hostage_recovery"
+        case MissionType_ReconExfil:
+            return "recon_exfil"
+        case MissionType_ConvoyAmbush:
+            return "convoy_ambush"
+        default:
+            return "cache_raid"
         }
     }
 
@@ -351,23 +524,61 @@ final class GameViewModel: ObservableObject {
     fileprivate var state = GameState()
     private var hudAccumulator: Float = 0
     private var mapExpanded = true
+    private var campaignProgress = CampaignProgress()
+    private var saveStatus = "No campaign save stored."
+    private var lastSavedAt: Date?
+    private var missionResolutionRecorded = false
 
     init() {
         _ = GameContentBootstrap.loadIntoEngine
         game_init(&state)
-        refreshHUD(force: true)
+        if !loadCampaign(startup: true) {
+            refreshHUD(force: true)
+        }
     }
 
     func reset() {
         game_restart(&state)
         hudAccumulator = 0
+        missionResolutionRecorded = false
         refreshHUD(force: true)
     }
 
     func nextMission() {
+        recordMissionResolutionIfNeeded()
         game_next_mission(&state)
         hudAccumulator = 0
+        missionResolutionRecorded = false
         refreshHUD(force: true)
+    }
+
+    func saveCampaign() {
+        recordMissionResolutionIfNeeded()
+
+        do {
+            let savedAt = Date()
+            let envelope = CampaignSaveEnvelope(
+                version: CampaignStore.version,
+                savedAt: savedAt,
+                mapExpanded: mapExpanded,
+                mission: GameContentBootstrap.missionKey(for: state.missionType),
+                campaign: campaignProgress,
+                stateSize: MemoryLayout<GameState>.size,
+                stateBlob: encodedStateBlob()
+            )
+            try CampaignStore.save(envelope)
+            lastSavedAt = savedAt
+            saveStatus = "Campaign saved."
+        } catch {
+            saveStatus = "Save failed: \(error.localizedDescription)"
+        }
+
+        refreshHUD(force: true)
+    }
+
+    @discardableResult
+    func loadCampaign() -> Bool {
+        loadCampaign(startup: false)
     }
 
     func toggleMap() {
@@ -382,6 +593,7 @@ final class GameViewModel: ObservableObject {
     func step(input: InputState, dt: Float) {
         var mutableInput = input
         game_update(&state, &mutableInput, dt)
+        recordMissionResolutionIfNeeded()
         hudAccumulator += dt
 
         if hudAccumulator >= 0.05 || state.victory || state.missionFailed {
@@ -399,6 +611,135 @@ final class GameViewModel: ObservableObject {
             return ""
         }
         return String(cString: cString)
+    }
+
+    private func loadCampaign(startup: Bool) -> Bool {
+        do {
+            let envelope = try CampaignStore.load()
+
+            guard envelope.version == CampaignStore.version else {
+                throw CampaignSaveError.invalidVersion(envelope.version)
+            }
+
+            let expectedStateSize = MemoryLayout<GameState>.size
+            guard envelope.stateSize == expectedStateSize, envelope.stateBlob.count == expectedStateSize else {
+                throw CampaignSaveError.invalidStateSize(expected: expectedStateSize, actual: envelope.stateBlob.count)
+            }
+
+            guard let missionType = GameContentBootstrap.missionType(for: envelope.mission) else {
+                throw CampaignSaveError.invalidMission(envelope.mission)
+            }
+
+            restoreState(from: envelope.stateBlob)
+            if state.missionType != missionType {
+                state.missionType = missionType
+            }
+
+            game_set_mission_cursor(state.missionType)
+            game_refresh_loaded_state(&state)
+
+            campaignProgress = envelope.campaign
+            mapExpanded = envelope.mapExpanded
+            lastSavedAt = envelope.savedAt
+            missionResolutionRecorded = state.victory || state.missionFailed
+            hudAccumulator = 0
+            saveStatus = startup
+                ? "Campaign resumed."
+                : "Campaign loaded."
+            refreshHUD(force: true)
+            return true
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            saveStatus = startup ? "No campaign save detected." : "No saved campaign found."
+        } catch {
+            saveStatus = startup
+                ? "Campaign resume failed: \(error.localizedDescription)"
+                : "Load failed: \(error.localizedDescription)"
+        }
+
+        return false
+    }
+
+    private func encodedStateBlob() -> Data {
+        var stateCopy = state
+        return withUnsafeBytes(of: &stateCopy) { Data($0) }
+    }
+
+    private func restoreState(from data: Data) {
+        withUnsafeMutableBytes(of: &state) { destination in
+            data.withUnsafeBytes { source in
+                destination.copyBytes(from: source)
+            }
+        }
+    }
+
+    private func recordMissionResolutionIfNeeded() {
+        guard !missionResolutionRecorded, state.victory || state.missionFailed else {
+            return
+        }
+
+        let missionKey = GameContentBootstrap.missionKey(for: state.missionType)
+        var stats = campaignProgress.missionStats[missionKey] ?? MissionCampaignStats()
+        stats.attempts += 1
+        stats.intelRecovered = stats.intelRecovered || state.radioIntelUnlocked
+
+        if state.victory {
+            stats.completions += 1
+            stats.bestKills = max(stats.bestKills, Int(state.kills))
+            stats.bestLoot = max(stats.bestLoot, Int(state.collectedItemCount))
+            let missionTime = Int(state.missionTime.rounded())
+            if let bestTimeSeconds = stats.bestTimeSeconds {
+                stats.bestTimeSeconds = min(bestTimeSeconds, missionTime)
+            } else {
+                stats.bestTimeSeconds = missionTime
+            }
+
+            if !campaignProgress.completedMissions.contains(missionKey) {
+                campaignProgress.completedMissions.append(missionKey)
+                campaignProgress.completedMissions.sort()
+            }
+            campaignProgress.lastResult = "\(displayName(for: state.missionType)) cleared in \(missionTime)s."
+        } else {
+            campaignProgress.lastResult = "\(displayName(for: state.missionType)) ended with an operator loss."
+        }
+
+        campaignProgress.missionStats[missionKey] = stats
+        missionResolutionRecorded = true
+    }
+
+    private func displayName(for missionType: MissionType) -> String {
+        switch missionType {
+        case MissionType_CacheRaid:
+            return "Cache Raid"
+        case MissionType_HostageRecovery:
+            return "Hostage Recovery"
+        case MissionType_ReconExfil:
+            return "Recon & Exfil"
+        case MissionType_ConvoyAmbush:
+            return "Convoy Ambush"
+        default:
+            return "Operation"
+        }
+    }
+
+    private func timestampString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func campaignStatusLine() -> String {
+        let completedCount = campaignProgress.completedMissions.count
+        let totalMissions = 4
+        let intelCount = campaignProgress.missionStats.values.filter(\.intelRecovered).count
+        return "Campaign \(completedCount)/\(totalMissions) ops cleared | Intel nets copied \(intelCount) | \(campaignProgress.lastResult)"
+    }
+
+    private func saveStatusLine() -> String {
+        if let lastSavedAt {
+            return "\(saveStatus) | Last archive \(timestampString(from: lastSavedAt))"
+        }
+        return saveStatus
     }
 
     private func refreshHUD(force: Bool) {
@@ -498,6 +839,8 @@ final class GameViewModel: ObservableObject {
             let mapMarkers = buildMapMarkers(from: statePointer, playerPosition: playerPosition, radioIntelUnlocked: radioIntelUnlocked)
             let routeSegments = buildRouteSegments(from: statePointer)
             let routeSummary = routeSummary(from: statePointer, worldHalfSize: worldHalfSize)
+            let campaignStatus = campaignStatusLine()
+            let saveStatus = saveStatusLine()
 
             hud = HUDSnapshot(
                 missionName: missionName,
@@ -516,6 +859,8 @@ final class GameViewModel: ObservableObject {
                 radioReport: radioReport,
                 routeSummary: routeSummary,
                 interactionHint: interactionHint,
+                campaignStatus: campaignStatus,
+                saveStatus: saveStatus,
                 worldHalfSize: worldHalfSize,
                 mapExpanded: mapExpanded,
                 mapTiles: mapTiles,

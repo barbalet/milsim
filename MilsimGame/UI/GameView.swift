@@ -12,6 +12,8 @@ struct GameView: View {
                 hud: viewModel.hud,
                 onRestart: { viewModel.reset() },
                 onNextMission: { viewModel.nextMission() },
+                onSaveCampaign: { viewModel.saveCampaign() },
+                onLoadCampaign: { _ = viewModel.loadCampaign() },
                 onToggleFullScreen: { NSApp.keyWindow?.toggleFullScreen(nil) },
                 onToggleMap: { viewModel.toggleMap() }
             )
