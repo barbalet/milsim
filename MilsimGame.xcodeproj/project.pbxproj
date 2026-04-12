@@ -1,0 +1,302 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000010000000000000001 /* MilsimGameApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000001 /* MilsimGameApp.swift */; };
+		A10000010000000000000002 /* GameViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000002 /* GameViewModel.swift */; };
+		A10000010000000000000003 /* GameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000003 /* GameView.swift */; };
+		A10000010000000000000004 /* HUDOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000004 /* HUDOverlayView.swift */; };
+		A10000010000000000000005 /* GameMetalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000005 /* GameMetalView.swift */; };
+		A10000010000000000000006 /* GameRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000006 /* GameRenderer.swift */; };
+		A10000010000000000000007 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000007 /* Shaders.metal */; };
+		A10000010000000000000008 /* engine.c in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000009 /* engine.c */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B10000010000000000000000 /* MilsimGame.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MilsimGame.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000010000000000000001 /* MilsimGameApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MilsimGameApp.swift; sourceTree = "<group>"; };
+		B10000010000000000000002 /* GameViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameViewModel.swift; sourceTree = "<group>"; };
+		B10000010000000000000003 /* GameView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameView.swift; sourceTree = "<group>"; };
+		B10000010000000000000004 /* HUDOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HUDOverlayView.swift; sourceTree = "<group>"; };
+		B10000010000000000000005 /* GameMetalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameMetalView.swift; sourceTree = "<group>"; };
+		B10000010000000000000006 /* GameRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameRenderer.swift; sourceTree = "<group>"; };
+		B10000010000000000000007 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		B10000010000000000000008 /* engine.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = engine.h; sourceTree = "<group>"; };
+		B10000010000000000000009 /* engine.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = engine.c; sourceTree = "<group>"; };
+		B10000010000000000000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10000010000000000000011 /* MilsimGame-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MilsimGame-Bridging-Header.h"; sourceTree = "<group>"; };
+		B10000010000000000000012 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		B10000010000000000000013 /* plan.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = plan.md; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D10000010000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		C10000010000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				C10000010000000000000002 /* MilsimGame */,
+				B10000010000000000000012 /* README.md */,
+				B10000010000000000000013 /* plan.md */,
+				C10000010000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C10000010000000000000002 /* MilsimGame */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000001 /* MilsimGameApp.swift */,
+				B10000010000000000000002 /* GameViewModel.swift */,
+				C10000010000000000000004 /* UI */,
+				C10000010000000000000005 /* Rendering */,
+				C10000010000000000000006 /* Engine */,
+				B10000010000000000000010 /* Info.plist */,
+				B10000010000000000000011 /* MilsimGame-Bridging-Header.h */,
+			);
+			path = MilsimGame;
+			sourceTree = "<group>";
+		};
+		C10000010000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000000 /* MilsimGame.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C10000010000000000000004 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000003 /* GameView.swift */,
+				B10000010000000000000004 /* HUDOverlayView.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		C10000010000000000000005 /* Rendering */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000005 /* GameMetalView.swift */,
+				B10000010000000000000006 /* GameRenderer.swift */,
+				B10000010000000000000007 /* Shaders.metal */,
+			);
+			path = Rendering;
+			sourceTree = "<group>";
+		};
+		C10000010000000000000006 /* Engine */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000009 /* engine.c */,
+				B10000010000000000000008 /* engine.h */,
+			);
+			path = Engine;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E10000010000000000000001 /* MilsimGame */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = H10000010000000000000001 /* Build configuration list for PBXNativeTarget "MilsimGame" */;
+			buildPhases = (
+				D10000010000000000000001 /* Sources */,
+				D10000010000000000000002 /* Frameworks */,
+				D10000010000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MilsimGame;
+			productName = MilsimGame;
+			productReference = B10000010000000000000000 /* MilsimGame.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F10000010000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2603;
+				LastUpgradeCheck = 2603;
+				TargetAttributes = {
+					E10000010000000000000001 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+				};
+			};
+			buildConfigurationList = H10000010000000000000002 /* Build configuration list for PBXProject "MilsimGame" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = C10000010000000000000001;
+			productRefGroup = C10000010000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E10000010000000000000001 /* MilsimGame */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D10000010000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D10000010000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000010000000000000001 /* MilsimGameApp.swift in Sources */,
+				A10000010000000000000002 /* GameViewModel.swift in Sources */,
+				A10000010000000000000003 /* GameView.swift in Sources */,
+				A10000010000000000000004 /* HUDOverlayView.swift in Sources */,
+				A10000010000000000000005 /* GameMetalView.swift in Sources */,
+				A10000010000000000000006 /* GameRenderer.swift in Sources */,
+				A10000010000000000000007 /* Shaders.metal in Sources */,
+				A10000010000000000000008 /* engine.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		G10000010000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		G10000010000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		G10000010000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/MilsimGame",
+					"$(SRCROOT)/MilsimGame/Engine",
+				);
+				INFOPLIST_FILE = MilsimGame/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.barbalet.MilsimGame;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = MilsimGame/MilsimGame-Bridging-Header.h;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		G10000010000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/MilsimGame",
+					"$(SRCROOT)/MilsimGame/Engine",
+				);
+				INFOPLIST_FILE = MilsimGame/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.barbalet.MilsimGame;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = MilsimGame/MilsimGame-Bridging-Header.h;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		H10000010000000000000001 /* Build configuration list for PBXNativeTarget "MilsimGame" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G10000010000000000000003 /* Debug */,
+				G10000010000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		H10000010000000000000002 /* Build configuration list for PBXProject "MilsimGame" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G10000010000000000000001 /* Debug */,
+				G10000010000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = F10000010000000000000001 /* Project object */;
+}
+
