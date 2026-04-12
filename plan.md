@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build a macOS military-simulation sandbox inspired by the ARMA family: large tactical spaces, grounded weapon handling, item scavenging, squad-scale pressure, and a path toward logistics, command, and scenario authoring. The first implementation target is a playable single-window or full-screen prototype in Xcode using SwiftUI, Metal, and a C gameplay core.
+Build a macOS military-simulation sandbox inspired by the ARMA family: large tactical spaces, grounded weapon handling, item scavenging, squad-scale pressure, and a path toward logistics, command, and scenario authoring. The first implementation target is a playable Xcode prototype in SwiftUI, Metal, and a C gameplay core that supports full-screen play and detachable companion windows for tactical panels.
 
 ## Genre Research Summary
 
@@ -23,7 +23,7 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 ## Current Vertical Slice
 
 - macOS app target in Xcode
-- SwiftUI HUD layered over Metal rendering
+- SwiftUI app shell with detachable mission, operator, tactical map, controls, and loadout windows around Metal rendering
 - C simulation core for player state, enemies, projectiles, and inventory
 - Collectible bullets, rifles, pistols, blade weapons, suppressors, and magazines
 - Windowed play plus full-screen toggle support
@@ -78,6 +78,12 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Added a lightweight first-person occlusion field so buildings, convoy wrecks, doors, low walls, towers, ridges, and foliage can suppress targets and pickups behind cover instead of letting every cue stack through the scene.
 - Tightened first-person sight readability with optic-ring alignment, iron-sight cues for non-optic weapons, and a closer weapon-to-reticle relationship during movement and recoil.
 - Added active attachment feedback in first-person with visible laser beams and dots, light wash and hotspot overlays, plus focus highlights and HUD assist prompts for nearby interactables and field gear.
+
+### Multi-Window Command Shell Added
+
+- Replaced the single in-window pseudo-panel stack with independent macOS windows for mission, operator, tactical map, controls, and loadout views.
+- Added panel-window coordination so the companion windows can be reopened from the menu bar and remain usable alongside a full-screen game window.
+- Preserved the main battlefield as the authoritative input window so panel launches restore focus back to the live mission instead of trapping movement input in a HUD panel.
 
 ## Cycle 0: Foundation and Playable Slice
 

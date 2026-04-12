@@ -1,4 +1,306 @@
+import AppKit
 import SwiftUI
+
+enum AppWindowID {
+    static let game = "milsim.window.game"
+}
+
+enum HUDPanelWindowID: String, CaseIterable {
+    case mission = "milsim.window.hud.mission"
+    case operatorStatus = "milsim.window.hud.operator"
+    case tacticalMap = "milsim.window.hud.map"
+    case controls = "milsim.window.hud.controls"
+    case loadout = "milsim.window.hud.loadout"
+
+    var title: String {
+        switch self {
+        case .mission:
+            return "Mission"
+        case .operatorStatus:
+            return "Operator"
+        case .tacticalMap:
+            return "Tactical Map"
+        case .controls:
+            return "Controls"
+        case .loadout:
+            return "Loadout"
+        }
+    }
+}
+
+@MainActor
+enum WindowCoordinator {
+    static func showAllPanels(using openWindow: OpenWindowAction) {
+        HUDPanelWindowID.allCases.forEach { panelID in
+            openWindow(id: panelID.rawValue)
+        }
+
+        DispatchQueue.main.async {
+            focusGameWindow()
+        }
+    }
+
+    static func toggleGameFullScreen() {
+        gameWindow()?.toggleFullScreen(nil)
+    }
+
+    static func showGameWindow(using openWindow: OpenWindowAction) {
+        openWindow(id: AppWindowID.game)
+
+        DispatchQueue.main.async {
+            focusGameWindow()
+        }
+    }
+
+    static func focusGameWindow() {
+        guard let window = gameWindow() else {
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    static func gameWindow() -> NSWindow? {
+        NSApp.windows.first { $0.identifier?.rawValue == AppWindowID.game }
+            ?? NSApp.windows.first { $0.title == "MilsimGame" }
+    }
+}
+
+struct MissionPanelView: View {
+    @ObservedObject var viewModel: GameViewModel
+
+    var body: some View {
+        let hud = viewModel.hud
+
+        HUDPanelChrome(title: "Mission") {
+            Text(hud.missionName)
+                .font(.system(size: 22, weight: .black, design: .monospaced))
+                .foregroundStyle(HUDPalette.sand)
+            Text(hud.missionBrief)
+                .foregroundStyle(HUDPalette.sand.opacity(0.92))
+            Text(hud.objective)
+                .foregroundStyle(HUDPalette.amber)
+            Text(hud.event)
+                .foregroundStyle(HUDPalette.sand.opacity(0.82))
+
+            if hud.victory || hud.failed {
+                Divider()
+                    .overlay(HUDPalette.olive.opacity(0.85))
+                    .padding(.vertical, 6)
+
+                Text(hud.victory ? "Operation complete." : "Mission failed.")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .foregroundStyle(hud.victory ? HUDPalette.green : HUDPalette.alert)
+
+                HStack(spacing: 10) {
+                    Button("Restart") {
+                        viewModel.reset()
+                    }
+                    Button("Next Op") {
+                        viewModel.nextMission()
+                    }
+                }
+                .buttonStyle(HUDButtonStyle())
+                .padding(.top, 4)
+            }
+        }
+    }
+}
+
+struct OperatorPanelView: View {
+    @ObservedObject var viewModel: GameViewModel
+
+    var body: some View {
+        let hud = viewModel.hud
+
+        HUDPanelChrome(title: "Operator") {
+            Text(hud.weapon)
+                .font(.system(size: 19, weight: .bold, design: .monospaced))
+                .foregroundStyle(HUDPalette.sand)
+            Text(hud.ammo)
+                .foregroundStyle(HUDPalette.sand.opacity(0.95))
+            Text(hud.signature)
+                .foregroundStyle(HUDPalette.blue.opacity(0.88))
+            Text(hud.presentation)
+                .foregroundStyle(HUDPalette.green.opacity(0.88))
+            Text(hud.presentationAssist)
+                .foregroundStyle(HUDPalette.sand.opacity(0.86))
+            Text(hud.posture)
+                .foregroundStyle(HUDPalette.amber)
+            Text(hud.health)
+                .foregroundStyle(HUDPalette.sand)
+            Text(hud.stamina)
+                .foregroundStyle(HUDPalette.sand)
+            Text(hud.wounds)
+                .foregroundStyle(HUDPalette.alert.opacity(0.92))
+            Text(hud.medical)
+                .foregroundStyle(HUDPalette.green.opacity(0.92))
+            Text("\(hud.compass) | Grid \(hud.gridReference)")
+                .foregroundStyle(HUDPalette.blue.opacity(0.92))
+            Text(hud.mission)
+                .foregroundStyle(HUDPalette.sand.opacity(0.8))
+        }
+    }
+}
+
+struct TacticalMapPanelView: View {
+    @ObservedObject var viewModel: GameViewModel
+
+    var body: some View {
+        let hud = viewModel.hud
+
+        HUDPanelChrome(title: "Tactical Map", scrolls: false) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Grid \(hud.gridReference)")
+                        .foregroundStyle(HUDPalette.amber)
+                    Text(hud.compass)
+                        .foregroundStyle(HUDPalette.blue.opacity(0.9))
+                    Spacer(minLength: 12)
+                    Button(hud.mapExpanded ? "Collapse Map" : "Expand Map") {
+                        viewModel.toggleMap()
+                    }
+                    .buttonStyle(HUDButtonStyle())
+                }
+
+                Text(hud.intelStatus)
+                    .foregroundStyle(HUDPalette.sand.opacity(0.86))
+                Text(hud.routeSummary)
+                    .foregroundStyle(HUDPalette.blue.opacity(0.92))
+                Text(hud.radioReport)
+                    .foregroundStyle(HUDPalette.green.opacity(0.92))
+
+                if hud.mapExpanded {
+                    TacticalMapView(hud: hud)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(minHeight: 260)
+                } else {
+                    Text("Map collapsed. Press `M` or use the button above to reopen it.")
+                        .foregroundStyle(HUDPalette.sand.opacity(0.82))
+                        .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+                }
+
+                Text(hud.interactionHint)
+                    .foregroundStyle(HUDPalette.sand.opacity(0.88))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+struct ControlsPanelView: View {
+    var body: some View {
+        HUDPanelChrome(title: "Controls") {
+            Text("WASD move   Shift sprint")
+            Text("Mouse aim   Left Mouse / Space fire")
+            Text("F or Right Mouse use / recover")
+            Text("R reload   B fire mode   V vault")
+            Text("H treat wounds / use gauze or splint")
+            Text("C crouch   Z prone   Q/E lean")
+            Text("Tab or wheel cycle   1 2 3 select")
+            Text("P presentation mode   M tactical map")
+            Text("Ctrl+Cmd+F full screen")
+            Text("Cmd+S save campaign   Cmd+L load campaign")
+        }
+    }
+}
+
+struct LoadoutPanelView: View {
+    @ObservedObject var viewModel: GameViewModel
+
+    var body: some View {
+        let hud = viewModel.hud
+
+        HUDPanelChrome(title: "Loadout") {
+            if hud.inventory.isEmpty {
+                Text("No equipment recovered")
+                    .foregroundStyle(HUDPalette.sand.opacity(0.85))
+            } else {
+                ForEach(hud.inventory) { row in
+                    Text(row.label)
+                        .font(.system(size: 13, weight: row.isSelected ? .bold : .regular, design: .monospaced))
+                        .foregroundStyle(row.isSelected ? HUDPalette.amber : HUDPalette.sand)
+                }
+            }
+
+            Text(hud.campaignStatus)
+                .foregroundStyle(HUDPalette.blue.opacity(0.92))
+                .padding(.top, 6)
+            Text(hud.saveStatus)
+                .foregroundStyle(HUDPalette.green.opacity(0.9))
+
+            HStack(spacing: 10) {
+                Button("Save") {
+                    viewModel.saveCampaign()
+                }
+                Button("Load") {
+                    _ = viewModel.loadCampaign()
+                }
+            }
+            .buttonStyle(HUDButtonStyle())
+            .padding(.top, 8)
+
+            HStack(spacing: 10) {
+                Button("Restart") {
+                    viewModel.reset()
+                }
+                Button("Next Op") {
+                    viewModel.nextMission()
+                }
+                Button("View Mode") {
+                    viewModel.togglePresentation()
+                }
+                Button("Full Screen") {
+                    WindowCoordinator.toggleGameFullScreen()
+                }
+            }
+            .buttonStyle(HUDButtonStyle())
+        }
+    }
+}
+
+private struct WindowConfigurator: NSViewRepresentable {
+    let identifier: String
+    let isHUDPanel: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            applyConfiguration(to: view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            applyConfiguration(to: nsView.window)
+        }
+    }
+
+    private func applyConfiguration(to window: NSWindow?) {
+        guard let window else {
+            return
+        }
+
+        window.identifier = NSUserInterfaceItemIdentifier(identifier)
+        window.tabbingMode = .disallowed
+
+        if isHUDPanel {
+            window.level = .floating
+            window.collectionBehavior.insert(.moveToActiveSpace)
+            window.collectionBehavior.insert(.fullScreenAuxiliary)
+        } else {
+            window.level = .normal
+        }
+    }
+}
+
+extension View {
+    func managedMilsimWindow(identifier: String, isHUDPanel: Bool = false) -> some View {
+        background(WindowConfigurator(identifier: identifier, isHUDPanel: isHUDPanel))
+    }
+}
 
 private enum HUDPalette {
     static let sand = Color(red: 0.93, green: 0.87, blue: 0.69)
@@ -11,184 +313,16 @@ private enum HUDPalette {
     static let green = Color(red: 0.33, green: 0.79, blue: 0.46)
 }
 
-struct HUDOverlayView: View {
-    let hud: HUDSnapshot
-    let onRestart: () -> Void
-    let onNextMission: () -> Void
-    let onSaveCampaign: () -> Void
-    let onLoadCampaign: () -> Void
-    let onToggleFullScreen: () -> Void
-    let onToggleMap: () -> Void
-    let onTogglePresentation: () -> Void
+private struct HUDPanelChrome<Content: View>: View {
+    let title: String
+    var scrolls = true
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
         ZStack {
-            VStack(spacing: 16) {
-                HStack(alignment: .top, spacing: 16) {
-                    hudCard(title: "Mission") {
-                        Text(hud.missionName)
-                            .font(.system(size: 21, weight: .black, design: .monospaced))
-                            .foregroundStyle(HUDPalette.sand)
-                        Text(hud.missionBrief)
-                            .foregroundStyle(HUDPalette.sand.opacity(0.9))
-                        Text(hud.objective)
-                            .foregroundStyle(HUDPalette.amber)
-                        Text(hud.event)
-                            .foregroundStyle(HUDPalette.sand.opacity(0.82))
-                    }
-                    .frame(maxWidth: 560, alignment: .leading)
+            HUDPalette.ink.opacity(0.98)
+                .ignoresSafeArea()
 
-                    Spacer(minLength: 16)
-
-                    hudCard(title: "Operator") {
-                        Text(hud.weapon)
-                            .font(.system(size: 19, weight: .bold, design: .monospaced))
-                            .foregroundStyle(HUDPalette.sand)
-                        Text(hud.ammo)
-                            .foregroundStyle(HUDPalette.sand.opacity(0.95))
-                        Text(hud.signature)
-                            .foregroundStyle(HUDPalette.blue.opacity(0.88))
-                        Text(hud.presentation)
-                            .foregroundStyle(HUDPalette.green.opacity(0.88))
-                        Text(hud.presentationAssist)
-                            .foregroundStyle(HUDPalette.sand.opacity(0.86))
-                        Text(hud.posture)
-                            .foregroundStyle(HUDPalette.amber)
-                        Text(hud.health)
-                            .foregroundStyle(HUDPalette.sand)
-                        Text(hud.stamina)
-                            .foregroundStyle(HUDPalette.sand)
-                        Text(hud.wounds)
-                            .foregroundStyle(HUDPalette.alert.opacity(0.92))
-                        Text(hud.medical)
-                            .foregroundStyle(HUDPalette.green.opacity(0.92))
-                        Text("\(hud.compass) | Grid \(hud.gridReference)")
-                            .foregroundStyle(HUDPalette.blue.opacity(0.92))
-                        Text(hud.mission)
-                            .foregroundStyle(HUDPalette.sand.opacity(0.8))
-                    }
-                    .frame(maxWidth: 450, alignment: .leading)
-                }
-
-                Spacer()
-
-                HStack(alignment: .bottom, spacing: 16) {
-                    hudCard(title: "Tactical Map") {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("Grid \(hud.gridReference)")
-                                .foregroundStyle(HUDPalette.amber)
-                            Text(hud.compass)
-                                .foregroundStyle(HUDPalette.blue.opacity(0.9))
-                            Spacer(minLength: 12)
-                            Button(hud.mapExpanded ? "Collapse Map" : "Expand Map", action: onToggleMap)
-                                .buttonStyle(HUDButtonStyle())
-                        }
-
-                        Text(hud.intelStatus)
-                            .foregroundStyle(HUDPalette.sand.opacity(0.86))
-                        Text(hud.routeSummary)
-                            .foregroundStyle(HUDPalette.blue.opacity(0.92))
-                        Text(hud.radioReport)
-                            .foregroundStyle(HUDPalette.green.opacity(0.92))
-
-                        if hud.mapExpanded {
-                            TacticalMapView(hud: hud)
-                                .frame(width: 340, height: 230)
-                        }
-
-                        Text(hud.interactionHint)
-                            .foregroundStyle(HUDPalette.sand.opacity(0.88))
-                    }
-                    .frame(width: hud.mapExpanded ? 380 : 320, alignment: .leading)
-
-                    hudCard(title: "Controls") {
-                        Text("WASD move   Shift sprint")
-                        Text("Mouse aim   Left Mouse / Space fire")
-                        Text("F or Right Mouse use / recover")
-                        Text("R reload   B fire mode   V vault")
-                        Text("H treat wounds / use gauze or splint")
-                        Text("C crouch   Z prone   Q/E lean")
-                        Text("Tab or wheel cycle   1 2 3 select")
-                        Text("P presentation mode   M tactical map")
-                        Text("Ctrl+Cmd+F full screen")
-                        Text("Cmd+S save campaign   Cmd+L load campaign")
-                    }
-                    .frame(width: 300, alignment: .leading)
-
-                    Spacer(minLength: 16)
-
-                    hudCard(title: "Loadout") {
-                        if hud.inventory.isEmpty {
-                            Text("No equipment recovered")
-                                .foregroundStyle(HUDPalette.sand.opacity(0.85))
-                        } else {
-                            ForEach(hud.inventory) { row in
-                                Text(row.label)
-                                    .font(.system(size: 13, weight: row.isSelected ? .bold : .regular, design: .monospaced))
-                                    .foregroundStyle(row.isSelected ? HUDPalette.amber : HUDPalette.sand)
-                            }
-                        }
-
-                        Text(hud.campaignStatus)
-                            .foregroundStyle(HUDPalette.blue.opacity(0.92))
-                            .padding(.top, 6)
-                        Text(hud.saveStatus)
-                            .foregroundStyle(HUDPalette.green.opacity(0.9))
-
-                        HStack(spacing: 10) {
-                            Button("Save", action: onSaveCampaign)
-                            Button("Load", action: onLoadCampaign)
-                        }
-                        .buttonStyle(HUDButtonStyle())
-                        .padding(.top, 8)
-
-                        HStack(spacing: 10) {
-                            Button("Restart", action: onRestart)
-                            Button("Next Op", action: onNextMission)
-                            Button("View Mode", action: onTogglePresentation)
-                            Button("Full Screen", action: onToggleFullScreen)
-                        }
-                        .buttonStyle(HUDButtonStyle())
-                    }
-                    .frame(maxWidth: 500, alignment: .leading)
-                }
-            }
-
-            if hud.victory || hud.failed {
-                Color.black.opacity(0.48)
-                    .ignoresSafeArea()
-
-                hudCard(title: hud.victory ? "Operation Complete" : "Mission Failed") {
-                    Text(hud.victory ? "The objective package made it to extraction." : "The operator was lost before exfiltration.")
-                        .foregroundStyle(HUDPalette.sand)
-                    Text(hud.event)
-                        .foregroundStyle(hud.victory ? HUDPalette.amber : HUDPalette.alert)
-
-                    HStack(spacing: 12) {
-                        Button("Restart", action: onRestart)
-                        Button("Next Op", action: onNextMission)
-                    }
-                    .buttonStyle(HUDButtonStyle())
-                    .padding(.top, 6)
-                }
-                .frame(width: 440)
-            }
-        }
-        .font(.system(size: 14, weight: .medium, design: .monospaced))
-    }
-
-    @ViewBuilder
-    private func hudCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .black, design: .monospaced))
-                .kerning(1.8)
-                .foregroundStyle(HUDPalette.amber)
-
-            content()
-        }
-        .padding(16)
-        .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(
                     LinearGradient(
@@ -197,12 +331,38 @@ struct HUDOverlayView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(HUDPalette.olive.opacity(0.95), lineWidth: 1.25)
-        )
-        .shadow(color: .black.opacity(0.3), radius: 18, x: 0, y: 10)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(HUDPalette.olive.opacity(0.95), lineWidth: 1.25)
+                )
+                .shadow(color: .black.opacity(0.3), radius: 18, x: 0, y: 10)
+                .padding(10)
+
+            if scrolls {
+                ScrollView {
+                    panelBody
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(28)
+                }
+            } else {
+                panelBody
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(28)
+            }
+        }
+        .font(.system(size: 14, weight: .medium, design: .monospaced))
+    }
+
+    @ViewBuilder
+    private var panelBody: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.system(size: 11, weight: .black, design: .monospaced))
+                .kerning(1.8)
+                .foregroundStyle(HUDPalette.amber)
+
+            content()
+        }
     }
 }
 

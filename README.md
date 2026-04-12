@@ -40,6 +40,7 @@ The current build is a playable tactical slice with completed Cycle 2 environmen
 - Layered battlefield structures rendered in Metal: ridges, roads, compounds, low walls, towers, convoy hulks, gates, and concealment foliage
 - Interactable gates, supply crates, dead drops, radios, and emplaced weapons
 - SwiftUI tactical map with grid references, compass heading, discovered markers, command route overlays, radio reports, and radio-gated hostile intel
+- Mission, operator, tactical map, controls, and loadout now run as independent macOS windows so they can be moved and resized separately from the game view, with a `Panels` menu to reopen or refocus them if closed
 - Toggleable first-person presentation pass with projected structures, enemies, items, tracers, reticle, held-weapon view models, cover-based occlusion, sight-alignment cues, active laser/light overlays, and close-range focus highlighting over the live C simulation
 - Bundled JSON item definitions and mission loot tables loaded into the C engine at startup
 - Bundled JSON mission scripts for brief, initial-event, and radio-callout overrides

@@ -1,26 +1,20 @@
-import AppKit
 import SwiftUI
 
 struct GameView: View {
     @ObservedObject var viewModel: GameViewModel
+    @Environment(\.openWindow) private var openWindow
+    @State private var openedCompanionWindows = false
 
     var body: some View {
-        ZStack {
-            MetalGameView(viewModel: viewModel)
-
-            HUDOverlayView(
-                hud: viewModel.hud,
-                onRestart: { viewModel.reset() },
-                onNextMission: { viewModel.nextMission() },
-                onSaveCampaign: { viewModel.saveCampaign() },
-                onLoadCampaign: { _ = viewModel.loadCampaign() },
-                onToggleFullScreen: { NSApp.keyWindow?.toggleFullScreen(nil) },
-                onToggleMap: { viewModel.toggleMap() },
-                onTogglePresentation: { viewModel.togglePresentation() }
-            )
-            .padding(22)
-        }
+        MetalGameView(viewModel: viewModel)
         .background(Color.black)
         .ignoresSafeArea()
+        .onAppear {
+            guard !openedCompanionWindows else {
+                return
+            }
+            openedCompanionWindows = true
+            WindowCoordinator.showAllPanels(using: openWindow)
+        }
     }
 }
