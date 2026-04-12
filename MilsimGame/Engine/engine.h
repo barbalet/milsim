@@ -17,6 +17,9 @@ extern "C" {
 #define GAME_TERRAIN_COLUMNS 14
 #define GAME_TERRAIN_ROWS 10
 #define GAME_MAX_TERRAIN_TILES (GAME_TERRAIN_COLUMNS * GAME_TERRAIN_ROWS)
+#define GAME_MAX_NAV_NODES 48
+#define GAME_MAX_NAV_LINKS 6
+#define GAME_MAX_COMMAND_ROUTE_POINTS 24
 #define GAME_EVENT_LENGTH 96
 
 typedef enum AmmoType {
@@ -152,6 +155,7 @@ typedef struct InventoryItem {
 
 typedef struct WorldItem {
     bool active;
+    bool discovered;
     ItemKind kind;
     AmmoType ammoType;
     WeaponClass weaponClass;
@@ -188,6 +192,8 @@ typedef struct Enemy {
     float fireCooldown;
     float patrolPhase;
     float hitTimer;
+    int currentNavNode;
+    int targetNavNode;
 } Enemy;
 
 typedef struct Structure {
@@ -204,6 +210,7 @@ typedef struct Structure {
 
 typedef struct Interactable {
     bool active;
+    bool discovered;
     InteractableKind kind;
     Vec2 position;
     Vec2 size;
@@ -227,6 +234,19 @@ typedef struct TerrainTile {
     float navigationCost;
     bool conceals;
 } TerrainTile;
+
+typedef struct NavigationNode {
+    bool active;
+    Vec2 position;
+    float traversalCost;
+    bool offersCover;
+    bool elevated;
+    bool objectiveAnchor;
+    bool extractionAnchor;
+    int linkCount;
+    int links[GAME_MAX_NAV_LINKS];
+    int doorInteractableIndices[GAME_MAX_NAV_LINKS];
+} NavigationNode;
 
 typedef struct Player {
     Vec2 position;
@@ -260,12 +280,16 @@ typedef struct GameState {
     Structure structures[GAME_MAX_STRUCTURES];
     Interactable interactables[GAME_MAX_INTERACTABLES];
     TerrainTile terrainTiles[GAME_MAX_TERRAIN_TILES];
+    NavigationNode navigationNodes[GAME_MAX_NAV_NODES];
+    Vec2 commandRoutePoints[GAME_MAX_COMMAND_ROUTE_POINTS];
     MissionType missionType;
     Vec2 extractionZone;
     float extractionRadius;
     float missionTime;
+    float radioReportCooldown;
     int objectiveCount;
     int objectiveTarget;
+    int commandRouteCount;
     int collectedItemCount;
     int kills;
     bool victory;
@@ -273,6 +297,7 @@ typedef struct GameState {
     bool radioIntelUnlocked;
     char missionName[32];
     char missionBrief[GAME_EVENT_LENGTH];
+    char radioReport[GAME_EVENT_LENGTH];
     char lastEvent[GAME_EVENT_LENGTH];
 } GameState;
 
@@ -346,11 +371,17 @@ const Interactable *game_interactable_at(const GameState *state, size_t index);
 size_t game_terrain_tile_count(const GameState *state);
 const TerrainTile *game_terrain_tile_at(const GameState *state, size_t index);
 
+size_t game_navigation_node_count(const GameState *state);
+const NavigationNode *game_navigation_node_at(const GameState *state, size_t index);
+size_t game_command_route_count(const GameState *state);
+const Vec2 *game_command_route_point_at(const GameState *state, size_t index);
+
 float game_player_health(const GameState *state);
 float game_player_stamina(const GameState *state);
 float game_player_lean(const GameState *state);
 int game_player_total_ammo(const GameState *state, AmmoType ammoType);
 bool game_radio_intel_unlocked(const GameState *state);
+const char *game_radio_report(const GameState *state);
 
 #ifdef __cplusplus
 }

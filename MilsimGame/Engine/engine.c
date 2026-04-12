@@ -68,6 +68,18 @@ static int add_inventory_item(Player *player, InventoryItem item);
 static void add_world_item(GameState *state, WorldItem item);
 static void register_default_content(void);
 static void ensure_content_database_loaded(void);
+static int add_navigation_node(GameState *state,
+                               Vec2 position,
+                               float traversalCost,
+                               bool offersCover,
+                               bool elevated,
+                               bool objectiveAnchor,
+                               bool extractionAnchor);
+static void add_navigation_link(GameState *state, int fromIndex, int toIndex, int doorInteractableIndex);
+static int nearest_navigation_node(const GameState *state, Vec2 position);
+static void update_command_route(GameState *state);
+static void update_discovery(GameState *state);
+static void update_radio_report(GameState *state, float dt);
 
 static float clampf(float value, float minimum, float maximum) {
     if (value < minimum) {
@@ -599,6 +611,393 @@ static void apply_mission_content(GameState *state, MissionType missionType) {
     }
 }
 
+static int add_navigation_node(GameState *state,
+                               Vec2 position,
+                               float traversalCost,
+                               bool offersCover,
+                               bool elevated,
+                               bool objectiveAnchor,
+                               bool extractionAnchor) {
+    size_t index;
+
+    for (index = 0; index < GAME_MAX_NAV_NODES; index += 1) {
+        if (!state->navigationNodes[index].active) {
+            NavigationNode *node = &state->navigationNodes[index];
+            size_t linkIndex;
+
+            memset(node, 0, sizeof(*node));
+            node->active = true;
+            node->position = position;
+            node->traversalCost = traversalCost;
+            node->offersCover = offersCover;
+            node->elevated = elevated;
+            node->objectiveAnchor = objectiveAnchor;
+            node->extractionAnchor = extractionAnchor;
+            node->linkCount = 0;
+
+            for (linkIndex = 0; linkIndex < GAME_MAX_NAV_LINKS; linkIndex += 1) {
+                node->links[linkIndex] = -1;
+                node->doorInteractableIndices[linkIndex] = -1;
+            }
+
+            return (int) index;
+        }
+    }
+
+    return -1;
+}
+
+static void add_navigation_edge_one_way(GameState *state, int fromIndex, int toIndex, int doorInteractableIndex) {
+    NavigationNode *node;
+    int slot;
+
+    if (fromIndex < 0 || fromIndex >= GAME_MAX_NAV_NODES || toIndex < 0 || toIndex >= GAME_MAX_NAV_NODES) {
+        return;
+    }
+
+    node = &state->navigationNodes[fromIndex];
+    if (!node->active) {
+        return;
+    }
+
+    for (slot = 0; slot < node->linkCount; slot += 1) {
+        if (node->links[slot] == toIndex) {
+            node->doorInteractableIndices[slot] = doorInteractableIndex;
+            return;
+        }
+    }
+
+    if (node->linkCount >= GAME_MAX_NAV_LINKS) {
+        return;
+    }
+
+    node->links[node->linkCount] = toIndex;
+    node->doorInteractableIndices[node->linkCount] = doorInteractableIndex;
+    node->linkCount += 1;
+}
+
+static void add_navigation_link(GameState *state, int fromIndex, int toIndex, int doorInteractableIndex) {
+    add_navigation_edge_one_way(state, fromIndex, toIndex, doorInteractableIndex);
+    add_navigation_edge_one_way(state, toIndex, fromIndex, doorInteractableIndex);
+}
+
+static bool navigation_link_is_open(const GameState *state, const NavigationNode *node, int linkIndex) {
+    int doorIndex;
+
+    if (linkIndex < 0 || linkIndex >= node->linkCount) {
+        return false;
+    }
+
+    doorIndex = node->doorInteractableIndices[linkIndex];
+    if (doorIndex < 0) {
+        return true;
+    }
+    if (doorIndex >= GAME_MAX_INTERACTABLES) {
+        return false;
+    }
+    if (!state->interactables[doorIndex].active) {
+        return true;
+    }
+    return state->interactables[doorIndex].toggled;
+}
+
+static int nearest_navigation_node(const GameState *state, Vec2 position) {
+    size_t index;
+    int bestIndex = -1;
+    float bestDistance = 1000000.0f;
+
+    for (index = 0; index < GAME_MAX_NAV_NODES; index += 1) {
+        float distance;
+        const NavigationNode *node = &state->navigationNodes[index];
+
+        if (!node->active) {
+            continue;
+        }
+
+        distance = vec2_distance(position, node->position);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIndex = (int) index;
+        }
+    }
+
+    return bestIndex;
+}
+
+static Vec2 current_command_target_position(const GameState *state) {
+    size_t index;
+
+    if (state->objectiveCount >= state->objectiveTarget) {
+        return state->extractionZone;
+    }
+
+    for (index = 0; index < GAME_MAX_ITEMS; index += 1) {
+        const WorldItem *item = &state->worldItems[index];
+        if (item->active && item->kind == ItemKind_Objective) {
+            return item->position;
+        }
+    }
+
+    return state->extractionZone;
+}
+
+static void update_command_route(GameState *state) {
+    int startIndex;
+    int targetIndex;
+    Vec2 targetPosition;
+    float distanceCost[GAME_MAX_NAV_NODES];
+    int previousNode[GAME_MAX_NAV_NODES];
+    bool visited[GAME_MAX_NAV_NODES];
+    int pathStack[GAME_MAX_NAV_NODES];
+    int pathCount = 0;
+    int currentIndex;
+    bool reachedTarget = true;
+    size_t index;
+
+    state->commandRouteCount = 0;
+
+    targetPosition = current_command_target_position(state);
+    startIndex = nearest_navigation_node(state, state->player.position);
+    targetIndex = nearest_navigation_node(state, targetPosition);
+
+    if (startIndex < 0 || targetIndex < 0) {
+        state->commandRoutePoints[0] = state->player.position;
+        state->commandRoutePoints[1] = targetPosition;
+        state->commandRouteCount = 2;
+        return;
+    }
+
+    for (index = 0; index < GAME_MAX_NAV_NODES; index += 1) {
+        distanceCost[index] = 1000000.0f;
+        previousNode[index] = -1;
+        visited[index] = false;
+    }
+    distanceCost[startIndex] = 0.0f;
+
+    for (;;) {
+        size_t nodeIndex;
+        float bestScore = 1000000.0f;
+        currentIndex = -1;
+
+        for (nodeIndex = 0; nodeIndex < GAME_MAX_NAV_NODES; nodeIndex += 1) {
+            if (!state->navigationNodes[nodeIndex].active || visited[nodeIndex]) {
+                continue;
+            }
+            if (distanceCost[nodeIndex] < bestScore) {
+                bestScore = distanceCost[nodeIndex];
+                currentIndex = (int) nodeIndex;
+            }
+        }
+
+        if (currentIndex < 0 || currentIndex == targetIndex) {
+            break;
+        }
+
+        visited[currentIndex] = true;
+
+        {
+            NavigationNode *node = &state->navigationNodes[currentIndex];
+            int linkSlot;
+            for (linkSlot = 0; linkSlot < node->linkCount; linkSlot += 1) {
+                int nextIndex = node->links[linkSlot];
+                NavigationNode *nextNode;
+                float segmentCost;
+
+                if (nextIndex < 0 || nextIndex >= GAME_MAX_NAV_NODES || !navigation_link_is_open(state, node, linkSlot)) {
+                    continue;
+                }
+
+                nextNode = &state->navigationNodes[nextIndex];
+                if (!nextNode->active) {
+                    continue;
+                }
+
+                segmentCost = vec2_distance(node->position, nextNode->position);
+                segmentCost *= (node->traversalCost + nextNode->traversalCost) * 0.5f;
+                if (nextNode->offersCover) {
+                    segmentCost *= 0.92f;
+                }
+                if (nextNode->elevated) {
+                    segmentCost *= 1.04f;
+                }
+
+                if (distanceCost[currentIndex] + segmentCost < distanceCost[nextIndex]) {
+                    distanceCost[nextIndex] = distanceCost[currentIndex] + segmentCost;
+                    previousNode[nextIndex] = currentIndex;
+                }
+            }
+        }
+    }
+
+    if (startIndex != targetIndex && previousNode[targetIndex] < 0) {
+        int fallbackIndex = -1;
+        float fallbackDistance = 1000000.0f;
+
+        reachedTarget = false;
+        for (index = 0; index < GAME_MAX_NAV_NODES; index += 1) {
+            float candidateDistance;
+            if (!state->navigationNodes[index].active || distanceCost[index] >= 999999.0f) {
+                continue;
+            }
+
+            candidateDistance = vec2_distance(state->navigationNodes[index].position, targetPosition);
+            if (candidateDistance < fallbackDistance) {
+                fallbackDistance = candidateDistance;
+                fallbackIndex = (int) index;
+            }
+        }
+
+        if (fallbackIndex < 0) {
+            state->commandRoutePoints[0] = state->player.position;
+            state->commandRoutePoints[1] = targetPosition;
+            state->commandRouteCount = 2;
+            return;
+        }
+
+        targetIndex = fallbackIndex;
+    }
+
+    currentIndex = targetIndex;
+    while (currentIndex >= 0 && pathCount < GAME_MAX_NAV_NODES) {
+        pathStack[pathCount] = currentIndex;
+        pathCount += 1;
+        if (currentIndex == startIndex) {
+            break;
+        }
+        currentIndex = previousNode[currentIndex];
+    }
+
+    state->commandRoutePoints[state->commandRouteCount] = state->player.position;
+    state->commandRouteCount += 1;
+
+    while (pathCount > 0 && state->commandRouteCount < GAME_MAX_COMMAND_ROUTE_POINTS - 1) {
+        pathCount -= 1;
+        state->commandRoutePoints[state->commandRouteCount] = state->navigationNodes[pathStack[pathCount]].position;
+        state->commandRouteCount += 1;
+    }
+
+    if (reachedTarget && state->commandRouteCount < GAME_MAX_COMMAND_ROUTE_POINTS) {
+        state->commandRoutePoints[state->commandRouteCount] = targetPosition;
+        state->commandRouteCount += 1;
+    }
+}
+
+static void update_discovery(GameState *state) {
+    size_t index;
+    const float worldItemDiscoveryRadius = 220.0f;
+    const float interactableDiscoveryRadius = 240.0f;
+
+    for (index = 0; index < GAME_MAX_ITEMS; index += 1) {
+        WorldItem *item = &state->worldItems[index];
+        if (!item->active || item->discovered) {
+            continue;
+        }
+
+        if (vec2_distance(state->player.position, item->position) <= worldItemDiscoveryRadius) {
+            item->discovered = true;
+        }
+    }
+
+    for (index = 0; index < GAME_MAX_INTERACTABLES; index += 1) {
+        Interactable *interactable = &state->interactables[index];
+        if (!interactable->active || interactable->discovered) {
+            continue;
+        }
+
+        if (vec2_distance(state->player.position, interactable->position) <= interactableDiscoveryRadius) {
+            interactable->discovered = true;
+        }
+    }
+}
+
+static void grid_reference_for_position(Vec2 position, char *buffer, size_t bufferSize) {
+    int column = clampi((int) floorf(((position.x + kWorldHalfWidth) / (kWorldHalfWidth * 2.0f)) * (float) GAME_TERRAIN_COLUMNS),
+                        0,
+                        GAME_TERRAIN_COLUMNS - 1);
+    int row = clampi((int) floorf(((position.y + kWorldHalfHeight) / (kWorldHalfHeight * 2.0f)) * (float) GAME_TERRAIN_ROWS),
+                     0,
+                     GAME_TERRAIN_ROWS - 1);
+    snprintf(buffer, bufferSize, "%c%d", 'A' + column, row + 1);
+}
+
+static int choose_patrol_target_node(const GameState *state, int currentNodeIndex, size_t enemyIndex, float patrolPhase) {
+    const NavigationNode *node;
+    int candidates[GAME_MAX_NAV_LINKS];
+    int candidateCount = 0;
+    int linkSlot;
+
+    if (currentNodeIndex < 0 || currentNodeIndex >= GAME_MAX_NAV_NODES) {
+        return -1;
+    }
+
+    node = &state->navigationNodes[currentNodeIndex];
+    if (!node->active) {
+        return -1;
+    }
+
+    for (linkSlot = 0; linkSlot < node->linkCount; linkSlot += 1) {
+        if (node->links[linkSlot] >= 0 && navigation_link_is_open(state, node, linkSlot)) {
+            candidates[candidateCount] = node->links[linkSlot];
+            candidateCount += 1;
+        }
+    }
+
+    if (candidateCount == 0) {
+        return -1;
+    }
+
+    return candidates[((int) floorf(state->missionTime * 0.18f + patrolPhase * 7.0f) + (int) enemyIndex) % candidateCount];
+}
+
+static void update_radio_report(GameState *state, float dt) {
+    char fromGrid[8];
+    char toGrid[8];
+    Enemy *reportEnemy = NULL;
+    size_t index;
+
+    state->radioReportCooldown = clampf(state->radioReportCooldown - dt, 0.0f, 600.0f);
+
+    if (!state->radioIntelUnlocked) {
+        copy_name(state->radioReport, sizeof(state->radioReport), "Command net quiet. Recover a radio to pull hostile traffic.");
+        return;
+    }
+
+    if (state->radioReportCooldown > 0.0f) {
+        return;
+    }
+
+    for (index = 0; index < GAME_MAX_ENEMIES; index += 1) {
+        if (state->enemies[index].active) {
+            reportEnemy = &state->enemies[index];
+            break;
+        }
+    }
+
+    if (reportEnemy == NULL) {
+        copy_name(state->radioReport, sizeof(state->radioReport), "Command net clear. No hostile transmitters are active.");
+        state->radioReportCooldown = 5.0f;
+        return;
+    }
+
+    grid_reference_for_position(reportEnemy->position, fromGrid, sizeof(fromGrid));
+    if (reportEnemy->targetNavNode >= 0 && reportEnemy->targetNavNode < GAME_MAX_NAV_NODES &&
+        state->navigationNodes[reportEnemy->targetNavNode].active) {
+        grid_reference_for_position(state->navigationNodes[reportEnemy->targetNavNode].position, toGrid, sizeof(toGrid));
+        snprintf(state->radioReport,
+                 sizeof(state->radioReport),
+                 "Intercept: patrol shifting from %s toward %s.",
+                 fromGrid,
+                 toGrid);
+    } else {
+        snprintf(state->radioReport,
+                 sizeof(state->radioReport),
+                 "Intercept: hostile chatter centered on sector %s.",
+                 fromGrid);
+    }
+
+    state->radioReportCooldown = 6.0f;
+}
+
 static int add_inventory_item(Player *player, InventoryItem item) {
     if (player->inventoryCount >= GAME_MAX_INVENTORY) {
         return -1;
@@ -613,6 +1012,7 @@ static void add_world_item(GameState *state, WorldItem item) {
     size_t index;
     for (index = 0; index < GAME_MAX_ITEMS; index += 1) {
         if (!state->worldItems[index].active) {
+            item.discovered = false;
             state->worldItems[index] = item;
             return;
         }
@@ -809,6 +1209,7 @@ static int add_interactable(GameState *state,
             Interactable *interactable = &state->interactables[index];
             memset(interactable, 0, sizeof(*interactable));
             interactable->active = true;
+            interactable->discovered = false;
             interactable->kind = kind;
             interactable->position = position;
             interactable->size = size;
@@ -831,8 +1232,7 @@ static int add_interactable(GameState *state,
 static int add_gate(GameState *state, Vec2 position, bool vertical, const char *name) {
     Vec2 size = vertical ? vec2_make(18.0f, 72.0f) : vec2_make(72.0f, 18.0f);
     int structureIndex = add_structure(state, StructureKind_Door, position, size, 0.0f, true, true, false, false);
-    add_interactable(state, InteractableKind_Door, position, size, 0.0f, structureIndex, false, false, 0.0f, 0, 0, 0, name);
-    return structureIndex;
+    return add_interactable(state, InteractableKind_Door, position, size, 0.0f, structureIndex, false, false, 0.0f, 0, 0, 0, name);
 }
 
 static void add_enemy(GameState *state, Vec2 position, float patrolPhase) {
@@ -846,6 +1246,8 @@ static void add_enemy(GameState *state, Vec2 position, float patrolPhase) {
             state->enemies[index].fireCooldown = 0.25f + (float) index * 0.07f;
             state->enemies[index].patrolPhase = patrolPhase;
             state->enemies[index].hitTimer = 0.0f;
+            state->enemies[index].currentNavNode = nearest_navigation_node(state, position);
+            state->enemies[index].targetNavNode = -1;
             return;
         }
     }
@@ -1174,7 +1576,9 @@ static void interact_with_radio(GameState *state, Interactable *interactable) {
 
     state->radioIntelUnlocked = true;
     interactable->toggled = true;
+    interactable->discovered = true;
     state->collectedItemCount += 1;
+    state->radioReportCooldown = 0.0f;
     set_event(state, "Radio intercept decoded. Hostile positions marked on the tactical map.");
 }
 
@@ -1232,6 +1636,8 @@ static void interact_with_interactable(GameState *state, size_t index) {
     if (!interactable->active) {
         return;
     }
+
+    interactable->discovered = true;
 
     switch (interactable->kind) {
         case InteractableKind_Door:
@@ -1672,6 +2078,8 @@ static void update_enemies(GameState *state, float dt) {
 
         if (distanceToPlayer < enemyDetectionRange) {
             moveDirection = vec2_normalize(toPlayer);
+            enemy->currentNavNode = nearest_navigation_node(state, enemy->position);
+            enemy->targetNavNode = nearest_navigation_node(state, state->player.position);
 
             if (distanceToPlayer > 170.0f) {
                 float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
@@ -1703,10 +2111,40 @@ static void update_enemies(GameState *state, float dt) {
                 enemy->fireCooldown = 0.95f + 0.16f * (float) index;
             }
         } else {
-            float patrolAngle = state->missionTime * 0.28f + enemy->patrolPhase;
-            float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
-            enemy->velocity = vec2_make(cosf(patrolAngle), sinf(patrolAngle * 1.18f));
-            attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, 34.0f * terrainMultiplier * dt)));
+            if (enemy->currentNavNode < 0) {
+                enemy->currentNavNode = nearest_navigation_node(state, enemy->position);
+            }
+
+            if (enemy->currentNavNode >= 0 && enemy->currentNavNode < GAME_MAX_NAV_NODES) {
+                if (enemy->targetNavNode < 0 || enemy->targetNavNode >= GAME_MAX_NAV_NODES ||
+                    !state->navigationNodes[enemy->targetNavNode].active) {
+                    enemy->targetNavNode = choose_patrol_target_node(state, enemy->currentNavNode, index, enemy->patrolPhase);
+                }
+
+                if (enemy->targetNavNode >= 0 && enemy->targetNavNode < GAME_MAX_NAV_NODES) {
+                    Vec2 patrolTarget = state->navigationNodes[enemy->targetNavNode].position;
+                    Vec2 toPatrolTarget = vec2_sub(patrolTarget, enemy->position);
+                    float distanceToPatrolTarget = vec2_length(toPatrolTarget);
+
+                    if (distanceToPatrolTarget < 34.0f) {
+                        enemy->position = patrolTarget;
+                        enemy->currentNavNode = enemy->targetNavNode;
+                        enemy->targetNavNode = choose_patrol_target_node(state, enemy->currentNavNode, index, enemy->patrolPhase);
+                        enemy->velocity = vec2_make(0.0f, 0.0f);
+                    } else {
+                        float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
+                        enemy->velocity = vec2_scale(vec2_normalize(toPatrolTarget), 54.0f * terrainMultiplier);
+                        attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, dt)));
+                    }
+                } else {
+                    enemy->velocity = vec2_make(0.0f, 0.0f);
+                }
+            } else {
+                float patrolAngle = state->missionTime * 0.28f + enemy->patrolPhase;
+                float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
+                enemy->velocity = vec2_make(cosf(patrolAngle), sinf(patrolAngle * 1.18f));
+                attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, 34.0f * terrainMultiplier * dt)));
+            }
         }
     }
 }
@@ -1809,6 +2247,15 @@ static void setup_common_player(GameState *state, Vec2 startPosition) {
 }
 
 static void setup_cache_raid(GameState *state) {
+    int northGateInteractable;
+    int infilNode;
+    int roadNode;
+    int treelineNode;
+    int gateNode;
+    int compoundNode;
+    int towerNode;
+    int extractNode;
+
     copy_name(state->missionName, sizeof(state->missionName), "Cache Raid");
     copy_name(state->missionBrief, sizeof(state->missionBrief), "Ridge approach. Breach the northern gate, strip the cache compound, tap the relay if time allows, and extract east.");
     state->objectiveTarget = 2;
@@ -1826,10 +2273,25 @@ static void setup_cache_raid(GameState *state) {
     add_structure(state, StructureKind_Building, vec2_make(520.0f, 180.0f), vec2_make(260.0f, 180.0f), 0.0f, true, true, false, false);
     add_structure(state, StructureKind_LowWall, vec2_make(430.0f, 320.0f), vec2_make(120.0f, 24.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_LowWall, vec2_make(610.0f, 320.0f), vec2_make(120.0f, 24.0f), 0.0f, true, true, true, false);
-    add_gate(state, vec2_make(520.0f, 320.0f), false, "North gate");
+    northGateInteractable = add_gate(state, vec2_make(520.0f, 320.0f), false, "North gate");
     add_structure(state, StructureKind_LowWall, vec2_make(360.0f, 180.0f), vec2_make(24.0f, 220.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_LowWall, vec2_make(680.0f, 180.0f), vec2_make(24.0f, 220.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_Tower, vec2_make(860.0f, 460.0f), vec2_make(80.0f, 80.0f), 0.0f, true, true, false, false);
+
+    infilNode = add_navigation_node(state, vec2_make(-1060.0f, -560.0f), 0.94f, true, false, false, false);
+    roadNode = add_navigation_node(state, vec2_make(-460.0f, -260.0f), 0.88f, false, false, false, false);
+    treelineNode = add_navigation_node(state, vec2_make(40.0f, 120.0f), 0.92f, true, false, false, false);
+    gateNode = add_navigation_node(state, vec2_make(500.0f, 300.0f), 0.96f, true, false, false, false);
+    compoundNode = add_navigation_node(state, vec2_make(520.0f, 180.0f), 0.98f, true, false, true, false);
+    towerNode = add_navigation_node(state, vec2_make(860.0f, 460.0f), 1.06f, true, true, true, false);
+    extractNode = add_navigation_node(state, vec2_make(1040.0f, 640.0f), 0.9f, false, false, false, true);
+
+    add_navigation_link(state, infilNode, roadNode, -1);
+    add_navigation_link(state, roadNode, treelineNode, -1);
+    add_navigation_link(state, treelineNode, gateNode, -1);
+    add_navigation_link(state, gateNode, compoundNode, northGateInteractable);
+    add_navigation_link(state, compoundNode, towerNode, -1);
+    add_navigation_link(state, towerNode, extractNode, -1);
 
     add_interactable(state, InteractableKind_SupplyCrate, vec2_make(-900.0f, -430.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 60, 17, 10, "Landing zone crate");
     add_interactable(state, InteractableKind_DeadDrop, vec2_make(40.0f, 140.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 30, 0, 0, "hide-site satchel");
@@ -1844,6 +2306,15 @@ static void setup_cache_raid(GameState *state) {
 }
 
 static void setup_hostage_recovery(GameState *state) {
+    int safehouseGateInteractable;
+    int westNode;
+    int crossroadNode;
+    int villageNode;
+    int gateNode;
+    int safehouseNode;
+    int southRoadNode;
+    int extractNode;
+
     copy_name(state->missionName, sizeof(state->missionName), "Hostage Recovery");
     copy_name(state->missionBrief, sizeof(state->missionBrief), "Push the village blocks, cut through the safehouse gate, lift the beacon, and use the radio net to keep the exfil route clean.");
     state->objectiveTarget = 1;
@@ -1861,10 +2332,25 @@ static void setup_hostage_recovery(GameState *state) {
     add_structure(state, StructureKind_Building, vec2_make(420.0f, 260.0f), vec2_make(220.0f, 150.0f), 0.0f, true, true, false, false);
     add_structure(state, StructureKind_LowWall, vec2_make(330.0f, 420.0f), vec2_make(140.0f, 24.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_LowWall, vec2_make(510.0f, 420.0f), vec2_make(140.0f, 24.0f), 0.0f, true, true, true, false);
-    add_gate(state, vec2_make(420.0f, 420.0f), false, "Safehouse gate");
+    safehouseGateInteractable = add_gate(state, vec2_make(420.0f, 420.0f), false, "Safehouse gate");
     add_structure(state, StructureKind_LowWall, vec2_make(560.0f, 250.0f), vec2_make(24.0f, 220.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_TreeCluster, vec2_make(760.0f, -40.0f), vec2_make(210.0f, 200.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_Ridge, vec2_make(860.0f, -300.0f), vec2_make(280.0f, 140.0f), 0.0f, true, true, false, false);
+
+    westNode = add_navigation_node(state, vec2_make(-820.0f, 420.0f), 0.92f, true, false, false, false);
+    crossroadNode = add_navigation_node(state, vec2_make(-120.0f, 120.0f), 0.88f, false, false, false, false);
+    villageNode = add_navigation_node(state, vec2_make(160.0f, 260.0f), 0.96f, true, false, false, false);
+    gateNode = add_navigation_node(state, vec2_make(420.0f, 420.0f), 0.98f, true, false, false, false);
+    safehouseNode = add_navigation_node(state, vec2_make(420.0f, 260.0f), 1.0f, true, false, true, false);
+    southRoadNode = add_navigation_node(state, vec2_make(220.0f, -180.0f), 0.9f, false, false, false, false);
+    extractNode = add_navigation_node(state, vec2_make(160.0f, -720.0f), 0.9f, false, false, false, true);
+
+    add_navigation_link(state, westNode, crossroadNode, -1);
+    add_navigation_link(state, crossroadNode, villageNode, -1);
+    add_navigation_link(state, villageNode, gateNode, -1);
+    add_navigation_link(state, gateNode, safehouseNode, safehouseGateInteractable);
+    add_navigation_link(state, safehouseNode, southRoadNode, -1);
+    add_navigation_link(state, southRoadNode, extractNode, -1);
 
     add_interactable(state, InteractableKind_SupplyCrate, vec2_make(500.0f, 340.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 45, 34, 15, "aid-and-ammo crate");
     add_interactable(state, InteractableKind_DeadDrop, vec2_make(-660.0f, 340.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 0, 17, 0, "village dead drop");
@@ -1880,6 +2366,15 @@ static void setup_hostage_recovery(GameState *state) {
 }
 
 static void setup_recon_exfil(GameState *state) {
+    int observationGateInteractable;
+    int infilNode;
+    int woodsNode;
+    int ridgeNode;
+    int centralGateNode;
+    int shackNode;
+    int northTreeNode;
+    int extractNode;
+
     copy_name(state->missionName, sizeof(state->missionName), "Recon & Exfil");
     copy_name(state->missionBrief, sizeof(state->missionBrief), "Move the tree line, pull the ridge observation package, probe the shack net, and ghost north once the map is filled in.");
     state->objectiveTarget = 2;
@@ -1898,8 +2393,23 @@ static void setup_recon_exfil(GameState *state) {
     add_structure(state, StructureKind_Building, vec2_make(-40.0f, 420.0f), vec2_make(180.0f, 120.0f), 0.0f, true, true, false, false);
     add_structure(state, StructureKind_LowWall, vec2_make(70.0f, 10.0f), vec2_make(120.0f, 24.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_LowWall, vec2_make(170.0f, 10.0f), vec2_make(60.0f, 24.0f), 0.0f, true, true, true, false);
-    add_gate(state, vec2_make(120.0f, 10.0f), false, "Observation gate");
+    observationGateInteractable = add_gate(state, vec2_make(120.0f, 10.0f), false, "Observation gate");
     add_structure(state, StructureKind_Road, vec2_make(-520.0f, 20.0f), vec2_make(720.0f, 76.0f), -0.15f, false, false, false, false);
+
+    infilNode = add_navigation_node(state, vec2_make(980.0f, -620.0f), 0.94f, true, false, false, false);
+    woodsNode = add_navigation_node(state, vec2_make(780.0f, -360.0f), 0.9f, true, false, false, false);
+    ridgeNode = add_navigation_node(state, vec2_make(260.0f, -120.0f), 1.04f, true, true, true, false);
+    centralGateNode = add_navigation_node(state, vec2_make(120.0f, 10.0f), 0.96f, true, false, false, false);
+    shackNode = add_navigation_node(state, vec2_make(-40.0f, 420.0f), 0.98f, true, false, true, false);
+    northTreeNode = add_navigation_node(state, vec2_make(-620.0f, 500.0f), 0.9f, true, false, false, false);
+    extractNode = add_navigation_node(state, vec2_make(-1040.0f, 700.0f), 0.9f, false, false, false, true);
+
+    add_navigation_link(state, infilNode, woodsNode, -1);
+    add_navigation_link(state, woodsNode, ridgeNode, -1);
+    add_navigation_link(state, ridgeNode, centralGateNode, -1);
+    add_navigation_link(state, centralGateNode, shackNode, observationGateInteractable);
+    add_navigation_link(state, shackNode, northTreeNode, -1);
+    add_navigation_link(state, northTreeNode, extractNode, -1);
 
     add_interactable(state, InteractableKind_SupplyCrate, vec2_make(-740.0f, 560.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 60, 17, 0, "concealed resupply crate");
     add_interactable(state, InteractableKind_DeadDrop, vec2_make(430.0f, 240.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 30, 17, 0, "treeline dead drop");
@@ -1914,6 +2424,15 @@ static void setup_recon_exfil(GameState *state) {
 }
 
 static void setup_convoy_ambush(GameState *state) {
+    int roadblockGateInteractable;
+    int eastNode;
+    int convoyNode;
+    int centerNode;
+    int roadblockNode;
+    int fallbackNode;
+    int ridgeNode;
+    int extractNode;
+
     copy_name(state->missionName, sizeof(state->missionName), "Convoy Ambush");
     copy_name(state->missionBrief, sizeof(state->missionBrief), "Break the road column, strip the manifest and tablet, raid the dead drop and support point if needed, then slide west through the trees.");
     state->objectiveTarget = 2;
@@ -1929,11 +2448,27 @@ static void setup_convoy_ambush(GameState *state) {
     add_structure(state, StructureKind_Convoy, vec2_make(-20.0f, 60.0f), vec2_make(220.0f, 80.0f), 0.0f, true, true, false, false);
     add_structure(state, StructureKind_LowWall, vec2_make(-320.0f, 220.0f), vec2_make(160.0f, 24.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_LowWall, vec2_make(-180.0f, 220.0f), vec2_make(80.0f, 24.0f), 0.0f, true, true, true, false);
-    add_gate(state, vec2_make(-260.0f, 220.0f), false, "Roadblock gate");
+    roadblockGateInteractable = add_gate(state, vec2_make(-260.0f, 220.0f), false, "Roadblock gate");
     add_structure(state, StructureKind_LowWall, vec2_make(620.0f, -120.0f), vec2_make(260.0f, 24.0f), 0.0f, true, true, true, false);
     add_structure(state, StructureKind_TreeCluster, vec2_make(860.0f, -220.0f), vec2_make(260.0f, 220.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_TreeCluster, vec2_make(-620.0f, 180.0f), vec2_make(260.0f, 220.0f), 0.0f, false, false, false, true);
     add_structure(state, StructureKind_Ridge, vec2_make(-840.0f, -220.0f), vec2_make(320.0f, 180.0f), 0.0f, true, true, false, false);
+
+    eastNode = add_navigation_node(state, vec2_make(1040.0f, 60.0f), 0.88f, false, false, false, false);
+    convoyNode = add_navigation_node(state, vec2_make(520.0f, 60.0f), 0.92f, true, false, false, false);
+    centerNode = add_navigation_node(state, vec2_make(120.0f, 60.0f), 0.96f, true, false, true, false);
+    roadblockNode = add_navigation_node(state, vec2_make(-260.0f, 220.0f), 0.98f, true, false, false, false);
+    fallbackNode = add_navigation_node(state, vec2_make(-620.0f, 180.0f), 0.92f, true, false, false, false);
+    ridgeNode = add_navigation_node(state, vec2_make(-840.0f, -220.0f), 1.02f, true, true, false, false);
+    extractNode = add_navigation_node(state, vec2_make(-1100.0f, 140.0f), 0.9f, false, false, false, true);
+
+    add_navigation_link(state, eastNode, convoyNode, -1);
+    add_navigation_link(state, convoyNode, centerNode, -1);
+    add_navigation_link(state, centerNode, roadblockNode, roadblockGateInteractable);
+    add_navigation_link(state, roadblockNode, fallbackNode, -1);
+    add_navigation_link(state, fallbackNode, extractNode, -1);
+    add_navigation_link(state, centerNode, ridgeNode, -1);
+    add_navigation_link(state, ridgeNode, extractNode, -1);
 
     add_interactable(state, InteractableKind_SupplyCrate, vec2_make(660.0f, -120.0f), vec2_make(58.0f, 40.0f), 0.0f, -1, false, true, 0.0f, 60, 17, 10, "convoy crate");
     add_interactable(state, InteractableKind_DeadDrop, vec2_make(-660.0f, 220.0f), vec2_make(42.0f, 42.0f), 0.0f, -1, false, true, 0.0f, 30, 17, 0, "fallback dead drop");
@@ -1958,6 +2493,7 @@ static void setup_mission(GameState *state, MissionType mission) {
     state->victory = false;
     state->missionFailed = false;
     state->radioIntelUnlocked = false;
+    state->radioReportCooldown = 0.0f;
     initialize_terrain(state, mission);
 
     switch (mission) {
@@ -1977,6 +2513,9 @@ static void setup_mission(GameState *state, MissionType mission) {
     }
 
     apply_mission_content(state, mission);
+    update_command_route(state);
+    update_discovery(state);
+    update_radio_report(state, 0.0f);
     set_event(state, state->missionBrief);
 }
 
@@ -2117,6 +2656,9 @@ void game_update(GameState *state, const InputState *input, float dt) {
     update_projectiles(state, dt);
     update_interactables(state, dt);
     update_enemies(state, dt);
+    update_discovery(state);
+    update_command_route(state);
+    update_radio_report(state, dt);
 
     if (state->player.health <= 0.0f) {
         state->missionFailed = true;
@@ -2358,6 +2900,43 @@ const TerrainTile *game_terrain_tile_at(const GameState *state, size_t index) {
     return &state->terrainTiles[index];
 }
 
+size_t game_navigation_node_count(const GameState *state) {
+    size_t count = 0;
+    size_t index;
+    for (index = 0; index < GAME_MAX_NAV_NODES; index += 1) {
+        if (state->navigationNodes[index].active) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+const NavigationNode *game_navigation_node_at(const GameState *state, size_t index) {
+    size_t count = 0;
+    size_t nodeIndex;
+    for (nodeIndex = 0; nodeIndex < GAME_MAX_NAV_NODES; nodeIndex += 1) {
+        if (!state->navigationNodes[nodeIndex].active) {
+            continue;
+        }
+        if (count == index) {
+            return &state->navigationNodes[nodeIndex];
+        }
+        count += 1;
+    }
+    return NULL;
+}
+
+size_t game_command_route_count(const GameState *state) {
+    return (size_t) state->commandRouteCount;
+}
+
+const Vec2 *game_command_route_point_at(const GameState *state, size_t index) {
+    if (index >= (size_t) state->commandRouteCount) {
+        return NULL;
+    }
+    return &state->commandRoutePoints[index];
+}
+
 float game_player_health(const GameState *state) {
     return state->player.health;
 }
@@ -2386,4 +2965,8 @@ int game_player_total_ammo(const GameState *state, AmmoType ammoType) {
 
 bool game_radio_intel_unlocked(const GameState *state) {
     return state->radioIntelUnlocked;
+}
+
+const char *game_radio_report(const GameState *state) {
+    return state->radioReport;
 }

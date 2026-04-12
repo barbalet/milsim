@@ -71,6 +71,10 @@ struct HUDOverlayView: View {
 
                         Text(hud.intelStatus)
                             .foregroundStyle(HUDPalette.sand.opacity(0.86))
+                        Text(hud.routeSummary)
+                            .foregroundStyle(HUDPalette.blue.opacity(0.92))
+                        Text(hud.radioReport)
+                            .foregroundStyle(HUDPalette.green.opacity(0.92))
 
                         if hud.mapExpanded {
                             TacticalMapView(hud: hud)
@@ -193,6 +197,16 @@ private struct TacticalMapView: View {
                 gridOverlay(in: proxy.size)
                     .stroke(HUDPalette.sand.opacity(0.12), lineWidth: 1)
 
+                routeOverlay(in: proxy.size)
+                    .stroke(
+                        LinearGradient(
+                            colors: [HUDPalette.amber.opacity(0.95), HUDPalette.blue.opacity(0.95)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round, dash: [7, 4])
+                    )
+
                 ForEach(hud.mapMarkers) { marker in
                     VStack(spacing: 3) {
                         markerGlyph(for: marker)
@@ -211,6 +225,17 @@ private struct TacticalMapView: View {
                     .stroke(HUDPalette.olive.opacity(0.92), lineWidth: 1.1)
             )
         }
+    }
+
+    private func routeOverlay(in size: CGSize) -> Path {
+        var path = Path()
+
+        for segment in hud.routeSegments {
+            path.move(to: mapPoint(for: segment.start, in: size))
+            path.addLine(to: mapPoint(for: segment.end, in: size))
+        }
+
+        return path
     }
 
     private func mapPoint(for position: SIMD2<Float>, in size: CGSize) -> CGPoint {

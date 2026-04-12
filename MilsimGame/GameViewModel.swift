@@ -49,6 +49,12 @@ struct TacticalMapMarker: Identifiable {
     let prominent: Bool
 }
 
+struct TacticalRouteSegment: Identifiable {
+    let id: Int
+    let start: SIMD2<Float>
+    let end: SIMD2<Float>
+}
+
 struct HUDSnapshot {
     var missionName = ""
     var missionBrief = ""
@@ -63,11 +69,14 @@ struct HUDSnapshot {
     var compass = ""
     var gridReference = ""
     var intelStatus = ""
+    var radioReport = ""
+    var routeSummary = ""
     var interactionHint = ""
     var worldHalfSize = SIMD2<Float>(1400, 980)
     var mapExpanded = true
     var mapTiles: [TacticalMapTile] = []
     var mapMarkers: [TacticalMapMarker] = []
+    var routeSegments: [TacticalRouteSegment] = []
     var inventory: [InventoryRow] = []
     var victory = false
     var failed = false
@@ -481,11 +490,14 @@ final class GameViewModel: ObservableObject {
             let compass = compassString(for: SIMD2<Float>(player.aim.x, player.aim.y))
             let gridReference = gridReference(for: playerPosition, worldHalfSize: worldHalfSize)
             let intelStatus = radioIntelUnlocked
-                ? "Radio intel live. Hostile markers are on the tactical map."
-                : "Radio intel dark. Hostiles stay off the map until a relay is tapped."
+                ? "Radio intel live. Hostiles and route updates are on the tactical map."
+                : "Radio intel dark. Discover sectors locally or tap a relay for hostile traffic."
+            let radioReport = string(from: game_radio_report(statePointer))
             let interactionHint = interactionHint(for: statePointer, playerPosition: playerPosition)
             let mapTiles = buildMapTiles(from: statePointer)
             let mapMarkers = buildMapMarkers(from: statePointer, playerPosition: playerPosition, radioIntelUnlocked: radioIntelUnlocked)
+            let routeSegments = buildRouteSegments(from: statePointer)
+            let routeSummary = routeSummary(from: statePointer, worldHalfSize: worldHalfSize)
 
             hud = HUDSnapshot(
                 missionName: missionName,
@@ -501,11 +513,14 @@ final class GameViewModel: ObservableObject {
                 compass: compass,
                 gridReference: gridReference,
                 intelStatus: intelStatus,
+                radioReport: radioReport,
+                routeSummary: routeSummary,
                 interactionHint: interactionHint,
                 worldHalfSize: worldHalfSize,
                 mapExpanded: mapExpanded,
                 mapTiles: mapTiles,
                 mapMarkers: mapMarkers,
+                routeSegments: routeSegments,
                 inventory: rows,
                 victory: statePointer.pointee.victory,
                 failed: statePointer.pointee.missionFailed
@@ -601,11 +616,22 @@ final class GameViewModel: ObservableObject {
             }
 
             if item.kind == ItemKind_Objective {
+                guard item.discovered else {
+                    continue
+                }
+
                 appendMarker(
                     position: SIMD2<Float>(item.position.x, item.position.y),
                     kind: .objective,
                     label: string(fromTuple: item.name),
                     prominent: true
+                )
+            } else if item.discovered {
+                appendMarker(
+                    position: SIMD2<Float>(item.position.x, item.position.y),
+                    kind: .supply,
+                    label: string(fromTuple: item.name),
+                    prominent: false
                 )
             }
         }
@@ -617,6 +643,9 @@ final class GameViewModel: ObservableObject {
             }
 
             if interactable.singleUse && interactable.toggled && interactable.kind != InteractableKind_Radio {
+                continue
+            }
+            if !interactable.discovered {
                 continue
             }
 
@@ -655,6 +684,57 @@ final class GameViewModel: ObservableObject {
         }
 
         return markers
+    }
+
+    private func buildRouteSegments(from statePointer: UnsafePointer<GameState>) -> [TacticalRouteSegment] {
+        let routePointCount = Int(game_command_route_count(statePointer))
+        guard routePointCount >= 2 else {
+            return []
+        }
+
+        var points: [SIMD2<Float>] = []
+        points.reserveCapacity(routePointCount)
+
+        for index in 0..<routePointCount {
+            guard let point = game_command_route_point_at(statePointer, index)?.pointee else {
+                continue
+            }
+            points.append(SIMD2<Float>(point.x, point.y))
+        }
+
+        guard points.count >= 2 else {
+            return []
+        }
+
+        var segments: [TacticalRouteSegment] = []
+        segments.reserveCapacity(points.count - 1)
+
+        for index in 1..<points.count {
+            segments.append(
+                TacticalRouteSegment(
+                    id: index - 1,
+                    start: points[index - 1],
+                    end: points[index]
+                )
+            )
+        }
+
+        return segments
+    }
+
+    private func routeSummary(from statePointer: UnsafePointer<GameState>, worldHalfSize: SIMD2<Float>) -> String {
+        let routePointCount = Int(game_command_route_count(statePointer))
+        guard routePointCount > 0,
+              let routePoint = game_command_route_point_at(statePointer, max(0, routePointCount - 1))?.pointee else {
+            return "Command route unavailable"
+        }
+
+        let destinationGrid = gridReference(
+            for: SIMD2<Float>(routePoint.x, routePoint.y),
+            worldHalfSize: worldHalfSize
+        )
+        let objectiveReady = game_mission_ready_for_extract(statePointer)
+        return objectiveReady ? "Command route to extraction at \(destinationGrid)" : "Command route to search sector \(destinationGrid)"
     }
 
     private func interactionHint(for statePointer: UnsafePointer<GameState>, playerPosition: SIMD2<Float>) -> String {

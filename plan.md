@@ -38,14 +38,15 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Added infantry posture controls: crouch, prone, lean, and low-cover vaulting.
 - Updated the HUD and mission flow so operations can be restarted or advanced to the next seed directly in-app.
 
-### Cycle 2 In Progress
+### Cycle 2 Completed
 
 - Added a tiled terrain system with material-driven movement and concealment.
 - Added interactable gates, supply crates, dead drops, radios, and emplaced weapons across all mission seeds.
 - Added a SwiftUI tactical map with compass heading, grid references, objective markers, and radio-unlocked hostile markers.
 - Moved weapon definitions, pickup templates, and mission loot tables into bundled JSON so content can be extended without editing the C mission setup.
+- Added a navigation graph with gate-aware patrol routes, command-route overlays, persistent marker discovery, and radio traffic summaries.
 - The environment now contributes more to route choice and information gathering instead of serving as a flat combat board.
-- Remaining Cycle 2 work: deepen terrain height/gameplay interaction and build stronger navigation metadata for future AI routing.
+- Residual follow-up: tune the new route graph density per mission and deepen terrain-height effects during detection and firefights.
 
 ## Cycle 0: Foundation and Playable Slice
 
@@ -128,7 +129,6 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Add terrain-aware routing hooks so future AI can read navigation costs and gates directly.
-- Expand map intelligence into radio reports, discovered markers, and squad command overlays.
 - Introduce mission scripting hooks and save/load support.
 - Begin Cycle 3 work on damage states, wound treatment, and fuller ballistic tradeoffs.
+- Add chamber-aware reload states, suppression effects, and first-pass wound treatment.
