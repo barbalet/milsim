@@ -8,10 +8,13 @@ struct InventoryRow: Identifiable {
 }
 
 struct HUDSnapshot {
+    var missionName = ""
+    var missionBrief = ""
     var objective = ""
     var event = ""
     var weapon = ""
     var ammo = ""
+    var posture = ""
     var health = ""
     var stamina = ""
     var mission = ""
@@ -32,7 +35,13 @@ final class GameViewModel: ObservableObject {
     }
 
     func reset() {
-        game_init(&state)
+        game_restart(&state)
+        hudAccumulator = 0
+        refreshHUD(force: true)
+    }
+
+    func nextMission() {
+        game_next_mission(&state)
         hudAccumulator = 0
         refreshHUD(force: true)
     }
@@ -69,18 +78,35 @@ final class GameViewModel: ObservableObject {
         withState { statePointer in
             let selectedIndex = Int(game_selected_inventory_index(statePointer))
             let selectedName = string(from: game_selected_item_name(statePointer))
-            let target = Int(game_collection_target())
-            let collected = statePointer.pointee.collectedItemCount
+            let objectiveCount = game_mission_objective_count(statePointer)
+            let objectiveTarget = game_mission_objective_target(statePointer)
+            let extractionReady = game_mission_ready_for_extract(statePointer)
+            let lootCount = statePointer.pointee.collectedItemCount
+            let missionName = string(from: game_mission_name(statePointer))
+            let missionBrief = string(from: game_mission_brief(statePointer))
+            let stance = string(from: game_player_stance_name(statePointer))
+            let fireMode = string(from: game_selected_fire_mode_name(statePointer))
+            let lean = game_player_lean(statePointer)
 
             var ammoLine = "Close assault weapon ready"
             if selectedIndex >= 0, let selectedItem = game_inventory_item_at(statePointer, selectedIndex) {
                 if selectedItem.pointee.kind == ItemKind_Gun {
                     let reserve = game_player_total_ammo(statePointer, selectedItem.pointee.ammoType)
                     let suppressorText = selectedItem.pointee.suppressed ? " | suppressed" : ""
-                    ammoLine = "\(selectedItem.pointee.roundsInMagazine)/\(selectedItem.pointee.magazineCapacity) in mag | \(reserve) reserve\(suppressorText)"
+                    let opticText = selectedItem.pointee.opticMounted ? " | optic" : ""
+                    ammoLine = "\(selectedItem.pointee.roundsInMagazine)/\(selectedItem.pointee.magazineCapacity) in mag | \(reserve) reserve | \(fireMode)\(suppressorText)\(opticText)"
                 } else if selectedItem.pointee.weaponClass == WeaponClass_Knife {
                     ammoLine = "Knife readied for close contact"
                 }
+            }
+
+            let leanText: String
+            if lean > 0.25 {
+                leanText = " | lean R"
+            } else if lean < -0.25 {
+                leanText = " | lean L"
+            } else {
+                leanText = ""
             }
 
             let inventoryCount = Int(game_inventory_count(statePointer))
@@ -97,7 +123,8 @@ final class GameViewModel: ObservableObject {
 
                 if item.pointee.kind == ItemKind_Gun {
                     let reserve = game_player_total_ammo(statePointer, item.pointee.ammoType)
-                    label += "  \(item.pointee.roundsInMagazine)/\(item.pointee.magazineCapacity) | \(reserve)"
+                    let itemFireMode = (selectedIndex == index) ? fireMode : fireModeName(for: item.pointee.fireMode)
+                    label += "  \(item.pointee.roundsInMagazine)/\(item.pointee.magazineCapacity) | \(reserve) | \(itemFireMode)"
                     if item.pointee.suppressed {
                         label += " | sup"
                     }
@@ -110,24 +137,32 @@ final class GameViewModel: ObservableObject {
                 rows.append(InventoryRow(id: index, label: label, isSelected: selectedIndex == index))
             }
 
-            var objective = "Recover \(target) field items. \(collected)/\(target) secured."
-            if collected >= target {
-                objective = "Enough equipment recovered. Move to the yellow extraction ring."
+            var objective = "Secure \(objectiveTarget) objective package"
+            if objectiveTarget != 1 {
+                objective += "s"
+            }
+            objective += ". \(objectiveCount)/\(objectiveTarget) recovered."
+
+            if extractionReady {
+                objective = "Objectives complete. Move to extraction."
             }
             if statePointer.pointee.victory {
-                objective = "Extraction complete. Loadout and intel secured."
+                objective = "Operation complete. Team exfiltrated with the package."
             }
             if statePointer.pointee.missionFailed {
-                objective = "Operator down. Restart the exercise."
+                objective = "Operator down. Restart or move to the next operation."
             }
 
-            let missionLine = "Kills \(statePointer.pointee.kills) | Loot \(collected)/\(target) | Time \(Int(statePointer.pointee.missionTime))s"
+            let missionLine = "Kills \(statePointer.pointee.kills) | Loot \(lootCount) | Time \(Int(statePointer.pointee.missionTime))s"
 
             hud = HUDSnapshot(
+                missionName: missionName,
+                missionBrief: missionBrief,
                 objective: objective,
                 event: string(from: game_last_event(statePointer)),
                 weapon: selectedName,
                 ammo: ammoLine,
+                posture: "\(stance)\(leanText)",
                 health: "Health \(Int(game_player_health(statePointer)))",
                 stamina: "Stamina \(Int(game_player_stamina(statePointer)))",
                 mission: missionLine,
@@ -137,5 +172,17 @@ final class GameViewModel: ObservableObject {
             )
         }
     }
-}
 
+    private func fireModeName(for mode: FireMode) -> String {
+        switch mode {
+        case FireMode_Semi:
+            return "Semi"
+        case FireMode_Burst:
+            return "Burst"
+        case FireMode_Auto:
+            return "Auto"
+        default:
+            return "Semi"
+        }
+    }
+}

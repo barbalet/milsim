@@ -10,6 +10,10 @@ fileprivate enum InputAction: Hashable {
     case primary
     case secondary
     case melee
+    case toggleFireMode
+    case crouch
+    case prone
+    case vault
 }
 
 final class InputController {
@@ -33,14 +37,20 @@ final class InputController {
         heldKeys.insert(keyCode)
 
         switch keyCode {
-        case 14:
+        case 3:
             queuedActions.insert(.collect)
         case 15:
             queuedActions.insert(.reload)
-        case 12:
-            queuedActions.insert(.cyclePrevious)
         case 48:
             queuedActions.insert(.cycleNext)
+        case 11:
+            queuedActions.insert(.toggleFireMode)
+        case 8:
+            queuedActions.insert(.crouch)
+        case 6:
+            queuedActions.insert(.prone)
+        case 9:
+            queuedActions.insert(.vault)
         case 18:
             queuedActions.insert(.primary)
         case 19:
@@ -90,6 +100,13 @@ final class InputController {
             input.moveX += 1
         }
 
+        if heldKeys.contains(12) {
+            input.lean -= 1
+        }
+        if heldKeys.contains(14) {
+            input.lean += 1
+        }
+
         input.wantsSprint = heldKeys.contains(56) || heldKeys.contains(60)
         input.wantsFire = isMouseFiring || isKeyboardFiring
 
@@ -115,6 +132,10 @@ final class InputController {
         input.wantsPrimary = queuedActions.remove(.primary) != nil
         input.wantsSecondary = queuedActions.remove(.secondary) != nil
         input.wantsMelee = queuedActions.remove(.melee) != nil
+        input.wantsToggleFireMode = queuedActions.remove(.toggleFireMode) != nil
+        input.wantsCrouchToggle = queuedActions.remove(.crouch) != nil
+        input.wantsProneToggle = queuedActions.remove(.prone) != nil
+        input.wantsVault = queuedActions.remove(.vault) != nil
 
         return input
     }

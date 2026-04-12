@@ -10,8 +10,9 @@ extern "C" {
 
 #define GAME_MAX_ITEMS 96
 #define GAME_MAX_PROJECTILES 64
-#define GAME_MAX_ENEMIES 12
+#define GAME_MAX_ENEMIES 16
 #define GAME_MAX_INVENTORY 24
+#define GAME_MAX_STRUCTURES 48
 #define GAME_EVENT_LENGTH 96
 
 typedef enum AmmoType {
@@ -36,8 +37,40 @@ typedef enum ItemKind {
     ItemKind_Magazine = 3,
     ItemKind_Blade = 4,
     ItemKind_Attachment = 5,
-    ItemKind_Medkit = 6
+    ItemKind_Medkit = 6,
+    ItemKind_Objective = 7
 } ItemKind;
+
+typedef enum FireMode {
+    FireMode_Semi = 0,
+    FireMode_Burst = 1,
+    FireMode_Auto = 2
+} FireMode;
+
+typedef enum Stance {
+    Stance_Stand = 0,
+    Stance_Crouch = 1,
+    Stance_Prone = 2
+} Stance;
+
+typedef enum MissionType {
+    MissionType_CacheRaid = 0,
+    MissionType_HostageRecovery = 1,
+    MissionType_ReconExfil = 2,
+    MissionType_ConvoyAmbush = 3,
+    MissionType_Count = 4
+} MissionType;
+
+typedef enum StructureKind {
+    StructureKind_None = 0,
+    StructureKind_Ridge = 1,
+    StructureKind_Road = 2,
+    StructureKind_TreeCluster = 3,
+    StructureKind_Building = 4,
+    StructureKind_LowWall = 5,
+    StructureKind_Tower = 6,
+    StructureKind_Convoy = 7
+} StructureKind;
 
 typedef struct Vec2 {
     float x;
@@ -49,6 +82,7 @@ typedef struct InputState {
     float moveY;
     float aimX;
     float aimY;
+    float lean;
     bool wantsFire;
     bool wantsCollect;
     bool wantsReload;
@@ -58,6 +92,10 @@ typedef struct InputState {
     bool wantsPrimary;
     bool wantsSecondary;
     bool wantsMelee;
+    bool wantsToggleFireMode;
+    bool wantsCrouchToggle;
+    bool wantsProneToggle;
+    bool wantsVault;
 } InputState;
 
 typedef struct InventoryItem {
@@ -72,6 +110,13 @@ typedef struct InventoryItem {
     float damage;
     float range;
     bool suppressed;
+    float recoil;
+    float muzzleVelocity;
+    FireMode fireMode;
+    unsigned int supportedFireModes;
+    bool supportsSuppressor;
+    bool supportsOptic;
+    bool opticMounted;
 } InventoryItem;
 
 typedef struct WorldItem {
@@ -86,6 +131,13 @@ typedef struct WorldItem {
     int roundsInMagazine;
     float damage;
     bool suppressed;
+    float recoil;
+    float muzzleVelocity;
+    FireMode fireMode;
+    unsigned int supportedFireModes;
+    bool supportsSuppressor;
+    bool supportsOptic;
+    bool opticMounted;
 } WorldItem;
 
 typedef struct Projectile {
@@ -104,7 +156,20 @@ typedef struct Enemy {
     float health;
     float fireCooldown;
     float patrolPhase;
+    float hitTimer;
 } Enemy;
+
+typedef struct Structure {
+    bool active;
+    StructureKind kind;
+    Vec2 position;
+    Vec2 size;
+    float rotation;
+    bool blocksMovement;
+    bool blocksProjectiles;
+    bool vaultable;
+    bool conceals;
+} Structure;
 
 typedef struct Player {
     Vec2 position;
@@ -113,6 +178,10 @@ typedef struct Player {
     float health;
     float stamina;
     float fireCooldown;
+    float lean;
+    float hitTimer;
+    float noiseTimer;
+    Stance stance;
     int inventoryCount;
     int selectedIndex;
     int primaryIndex;
@@ -121,6 +190,8 @@ typedef struct Player {
     int ammo556;
     int ammo9mm;
     int ammoShell;
+    int burstShotsRemaining;
+    bool triggerHeldLastFrame;
     InventoryItem inventory[GAME_MAX_INVENTORY];
 } Player;
 
@@ -129,17 +200,25 @@ typedef struct GameState {
     WorldItem worldItems[GAME_MAX_ITEMS];
     Projectile projectiles[GAME_MAX_PROJECTILES];
     Enemy enemies[GAME_MAX_ENEMIES];
+    Structure structures[GAME_MAX_STRUCTURES];
+    MissionType missionType;
     Vec2 extractionZone;
     float extractionRadius;
     float missionTime;
+    int objectiveCount;
+    int objectiveTarget;
     int collectedItemCount;
     int kills;
     bool victory;
     bool missionFailed;
+    char missionName[32];
+    char missionBrief[GAME_EVENT_LENGTH];
     char lastEvent[GAME_EVENT_LENGTH];
 } GameState;
 
 void game_init(GameState *state);
+void game_restart(GameState *state);
+void game_next_mission(GameState *state);
 void game_reset_input(InputState *input);
 void game_update(GameState *state, const InputState *input, float dt);
 void game_cycle_weapon(GameState *state, int direction);
@@ -151,8 +230,16 @@ size_t game_collection_target(void);
 float game_world_half_width(void);
 float game_world_half_height(void);
 
+const char *game_mission_name(const GameState *state);
+const char *game_mission_brief(const GameState *state);
+int game_mission_objective_count(const GameState *state);
+int game_mission_objective_target(const GameState *state);
+bool game_mission_ready_for_extract(const GameState *state);
+
 const char *game_last_event(const GameState *state);
 const char *game_selected_item_name(const GameState *state);
+const char *game_selected_fire_mode_name(const GameState *state);
+const char *game_player_stance_name(const GameState *state);
 
 size_t game_inventory_count(const GameState *state);
 const InventoryItem *game_inventory_item_at(const GameState *state, size_t index);
@@ -168,8 +255,12 @@ const Enemy *game_enemy_at(const GameState *state, size_t index);
 size_t game_projectile_count(const GameState *state);
 const Projectile *game_projectile_at(const GameState *state, size_t index);
 
+size_t game_structure_count(const GameState *state);
+const Structure *game_structure_at(const GameState *state, size_t index);
+
 float game_player_health(const GameState *state);
 float game_player_stamina(const GameState *state);
+float game_player_lean(const GameState *state);
 int game_player_total_ammo(const GameState *state, AmmoType ammoType);
 
 #ifdef __cplusplus
@@ -177,4 +268,3 @@ int game_player_total_ammo(const GameState *state, AmmoType ammoType);
 #endif
 
 #endif
-

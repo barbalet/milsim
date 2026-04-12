@@ -34,7 +34,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     private let inputController: InputController
 
     private var lastFrameTime: CFTimeInterval?
-    private let maxInstances = 1024
+    private let maxInstances = 1400
 
     init(view: MTKView, viewModel: GameViewModel, inputController: InputController) {
         self.device = view.device!
@@ -122,8 +122,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         lastFrameTime = now
 
         let worldViewport = SIMD2<Float>(
-            Float(view.drawableSize.width) * 1.05,
-            Float(view.drawableSize.height) * 1.05
+            Float(view.drawableSize.width) * 1.08,
+            Float(view.drawableSize.height) * 1.08
         )
 
         let input = inputController.makeInput(viewSize: view.bounds.size, worldViewport: worldViewport)
@@ -163,15 +163,54 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
     private func buildInstances(viewModel: GameViewModel, camera: SIMD2<Float>, worldViewport: SIMD2<Float>) -> [RenderInstance] {
         var instances: [RenderInstance] = []
-        instances.reserveCapacity(256)
+        instances.reserveCapacity(420)
 
-        addTerrain(to: &instances, camera: camera, worldViewport: worldViewport)
+        addTerrainBackdrop(to: &instances, camera: camera, worldViewport: worldViewport)
 
         viewModel.withState { statePointer in
+            let structureCount = Int(game_structure_count(statePointer))
+            for index in 0..<structureCount {
+                guard let structure = game_structure_at(statePointer, index)?.pointee else {
+                    continue
+                }
+
+                let position = SIMD2<Float>(structure.position.x, structure.position.y)
+                let size = SIMD2<Float>(structure.size.x, structure.size.y)
+                let rotation = structure.rotation
+
+                switch structure.kind {
+                case StructureKind_Ridge:
+                    instances.append(makeInstance(position: position, size: size, color: SIMD4<Float>(0.2, 0.23, 0.16, 0.95), rotation: rotation, shape: .rectangle))
+                    instances.append(makeInstance(position: position, size: size * SIMD2<Float>(0.92, 0.86), color: SIMD4<Float>(0.34, 0.28, 0.18, 0.35), rotation: rotation, shape: .rectangle))
+                case StructureKind_Road:
+                    instances.append(makeInstance(position: position, size: size, color: SIMD4<Float>(0.23, 0.24, 0.22, 0.92), rotation: rotation, shape: .rectangle))
+                    instances.append(makeInstance(position: position, size: size * SIMD2<Float>(0.98, 0.18), color: SIMD4<Float>(0.74, 0.72, 0.48, 0.3), rotation: rotation, shape: .rectangle))
+                case StructureKind_TreeCluster:
+                    instances.append(makeInstance(position: position, size: size, color: SIMD4<Float>(0.14, 0.35, 0.18, 0.55), rotation: 0, shape: .circle))
+                    instances.append(makeInstance(position: position + SIMD2<Float>(-28, 18), size: size * 0.42, color: SIMD4<Float>(0.12, 0.28, 0.14, 0.7), rotation: 0, shape: .circle))
+                    instances.append(makeInstance(position: position + SIMD2<Float>(32, -20), size: size * 0.34, color: SIMD4<Float>(0.18, 0.4, 0.2, 0.62), rotation: 0, shape: .circle))
+                case StructureKind_Building:
+                    instances.append(makeInstance(position: position, size: size, color: SIMD4<Float>(0.46, 0.44, 0.39, 0.94), rotation: rotation, shape: .rectangle))
+                    instances.append(makeInstance(position: position, size: size * SIMD2<Float>(0.82, 0.72), color: SIMD4<Float>(0.2, 0.22, 0.21, 0.78), rotation: rotation, shape: .rectangle))
+                case StructureKind_LowWall:
+                    instances.append(makeInstance(position: position, size: size, color: SIMD4<Float>(0.66, 0.63, 0.52, 0.95), rotation: rotation, shape: .rectangle))
+                case StructureKind_Tower:
+                    instances.append(makeInstance(position: position, size: size, color: SIMD4<Float>(0.54, 0.51, 0.4, 0.94), rotation: 0, shape: .rectangle))
+                    instances.append(makeInstance(position: position, size: size * 0.58, color: SIMD4<Float>(0.2, 0.18, 0.16, 0.84), rotation: 0, shape: .rectangle))
+                case StructureKind_Convoy:
+                    instances.append(makeInstance(position: position, size: size, color: SIMD4<Float>(0.28, 0.31, 0.27, 0.95), rotation: 0, shape: .rectangle))
+                    instances.append(makeInstance(position: position, size: size * SIMD2<Float>(0.7, 0.52), color: SIMD4<Float>(0.14, 0.15, 0.14, 0.88), rotation: 0, shape: .rectangle))
+                default:
+                    break
+                }
+            }
+
             let extraction = statePointer.pointee.extractionZone
             let extractionColor = statePointer.pointee.victory
-                ? SIMD4<Float>(0.4, 0.82, 0.46, 0.6)
-                : SIMD4<Float>(0.95, 0.78, 0.2, 0.6)
+                ? SIMD4<Float>(0.42, 0.82, 0.48, 0.62)
+                : (game_mission_ready_for_extract(statePointer)
+                    ? SIMD4<Float>(0.98, 0.83, 0.22, 0.66)
+                    : SIMD4<Float>(0.82, 0.73, 0.3, 0.36))
             instances.append(
                 makeInstance(
                     position: SIMD2<Float>(extraction.x, extraction.y),
@@ -195,13 +234,16 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 case ItemKind_Magazine:
                     instances.append(makeInstance(position: position, size: SIMD2<Float>(16, 28), color: SIMD4<Float>(0.93, 0.53, 0.18, 1), rotation: 0.08, shape: .rectangle))
                 case ItemKind_Gun:
-                    instances.append(makeInstance(position: position, size: SIMD2<Float>(36, 14), color: SIMD4<Float>(0.36, 0.82, 0.86, 1), rotation: 0.3, shape: .rectangle))
+                    instances.append(makeInstance(position: position, size: SIMD2<Float>(38, 14), color: SIMD4<Float>(0.36, 0.82, 0.86, 1), rotation: 0.28, shape: .rectangle))
                 case ItemKind_Blade:
                     instances.append(makeInstance(position: position, size: SIMD2<Float>(14, 40), color: SIMD4<Float>(0.85, 0.86, 0.9, 1), rotation: 0.52, shape: .rectangle))
                 case ItemKind_Attachment:
                     instances.append(makeInstance(position: position, size: SIMD2<Float>(24, 18), color: SIMD4<Float>(0.28, 0.82, 0.52, 1), rotation: 0.1, shape: .rectangle))
                 case ItemKind_Medkit:
                     instances.append(makeInstance(position: position, size: SIMD2<Float>(24, 24), color: SIMD4<Float>(0.92, 0.24, 0.18, 1), rotation: 0, shape: .rectangle))
+                case ItemKind_Objective:
+                    instances.append(makeInstance(position: position, size: SIMD2<Float>(30, 30), color: SIMD4<Float>(0.92, 0.8, 0.2, 0.92), rotation: 0, shape: .ring))
+                    instances.append(makeInstance(position: position, size: SIMD2<Float>(18, 18), color: SIMD4<Float>(0.96, 0.9, 0.36, 1), rotation: 0, shape: .circle))
                 default:
                     break
                 }
@@ -215,7 +257,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
                 let position = SIMD2<Float>(enemy.position.x, enemy.position.y)
                 let healthFactor = max(0.25, enemy.health / 100)
-                instances.append(makeInstance(position: position, size: SIMD2<Float>(34, 34), color: SIMD4<Float>(0.72, 0.18 + (0.3 * healthFactor), 0.15, 0.96), rotation: 0, shape: .circle))
+                let flash: Float = enemy.hitTimer > 0 ? 0.24 : 0.0
+                instances.append(makeInstance(position: position, size: SIMD2<Float>(34, 34), color: SIMD4<Float>(0.72 + flash, 0.18 + (0.3 * healthFactor), 0.15, 0.96), rotation: 0, shape: .circle))
                 instances.append(makeInstance(position: position + SIMD2<Float>(0, -28), size: SIMD2<Float>(42 * healthFactor, 5), color: SIMD4<Float>(0.95, 0.78, 0.2, 0.8), rotation: 0, shape: .rectangle))
             }
 
@@ -244,46 +287,56 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             let player = statePointer.pointee.player
             let playerPosition = SIMD2<Float>(player.position.x, player.position.y)
             let aim = simd_normalize(SIMD2<Float>(player.aim.x, player.aim.y))
+            let leanOffset = SIMD2<Float>(-aim.y, aim.x) * player.lean * 10
             let aimRotation = atan2f(aim.y, aim.x)
+            let bodySize: SIMD2<Float>
+            switch player.stance {
+            case Stance_Crouch:
+                bodySize = SIMD2<Float>(24, 24)
+            case Stance_Prone:
+                bodySize = SIMD2<Float>(18, 18)
+            default:
+                bodySize = SIMD2<Float>(30, 30)
+            }
+            let flash: Float = player.hitTimer > 0 ? 0.2 : 0.0
             let playerColor = statePointer.pointee.missionFailed
                 ? SIMD4<Float>(0.52, 0.19, 0.18, 0.85)
-                : SIMD4<Float>(0.26, 0.56, 0.9, 0.98)
+                : SIMD4<Float>(0.26 + flash, 0.56 + flash * 0.2, 0.9, 0.98)
 
             instances.append(makeInstance(position: playerPosition, size: SIMD2<Float>(40, 40), color: SIMD4<Float>(0.11, 0.17, 0.2, 0.45), rotation: 0, shape: .ring))
-            instances.append(makeInstance(position: playerPosition, size: SIMD2<Float>(30, 30), color: playerColor, rotation: 0, shape: .circle))
-            instances.append(makeInstance(position: playerPosition + (aim * 25), size: SIMD2<Float>(34, 8), color: SIMD4<Float>(0.96, 0.87, 0.76, 0.95), rotation: aimRotation, shape: .rectangle))
-            instances.append(makeInstance(position: playerPosition + (aim * 90), size: SIMD2<Float>(120, 2), color: SIMD4<Float>(0.3, 0.7, 0.96, 0.25), rotation: aimRotation, shape: .rectangle))
+            instances.append(makeInstance(position: playerPosition + leanOffset, size: bodySize, color: playerColor, rotation: 0, shape: .circle))
+            instances.append(makeInstance(position: playerPosition + leanOffset + (aim * 24), size: SIMD2<Float>(34, 8), color: SIMD4<Float>(0.96, 0.87, 0.76, 0.95), rotation: aimRotation, shape: .rectangle))
+            instances.append(makeInstance(position: playerPosition + (aim * 90), size: SIMD2<Float>(120, 2), color: SIMD4<Float>(0.3, 0.7, 0.96, 0.22), rotation: aimRotation, shape: .rectangle))
         }
 
         return instances
     }
 
-    private func addTerrain(to instances: inout [RenderInstance], camera: SIMD2<Float>, worldViewport: SIMD2<Float>) {
+    private func addTerrainBackdrop(to instances: inout [RenderInstance], camera: SIMD2<Float>, worldViewport: SIMD2<Float>) {
         instances.append(
             makeInstance(
                 position: camera,
-                size: worldViewport * 1.45,
+                size: worldViewport * 1.5,
                 color: SIMD4<Float>(0.08, 0.13, 0.09, 1),
                 rotation: 0,
                 shape: .rectangle
             )
         )
-
         instances.append(
             makeInstance(
-                position: camera + SIMD2<Float>(-140, 120),
-                size: worldViewport * SIMD2<Float>(0.62, 0.28),
-                color: SIMD4<Float>(0.15, 0.2, 0.12, 0.75),
-                rotation: -0.3,
+                position: camera + SIMD2<Float>(-180, 140),
+                size: worldViewport * SIMD2<Float>(0.74, 0.26),
+                color: SIMD4<Float>(0.12, 0.18, 0.12, 0.62),
+                rotation: -0.25,
                 shape: .rectangle
             )
         )
         instances.append(
             makeInstance(
-                position: camera + SIMD2<Float>(240, -160),
-                size: worldViewport * SIMD2<Float>(0.52, 0.22),
-                color: SIMD4<Float>(0.18, 0.14, 0.1, 0.55),
-                rotation: 0.4,
+                position: camera + SIMD2<Float>(260, -180),
+                size: worldViewport * SIMD2<Float>(0.55, 0.21),
+                color: SIMD4<Float>(0.18, 0.16, 0.12, 0.42),
+                rotation: 0.35,
                 shape: .rectangle
             )
         )
@@ -293,7 +346,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         let xEnd = ceil((camera.x + worldViewport.x * 0.65) / spacing) * spacing
         let yStart = floor((camera.y - worldViewport.y * 0.65) / spacing) * spacing
         let yEnd = ceil((camera.y + worldViewport.y * 0.65) / spacing) * spacing
-        let gridColor = SIMD4<Float>(0.28, 0.34, 0.22, 0.32)
+        let gridColor = SIMD4<Float>(0.28, 0.34, 0.22, 0.28)
 
         var x = xStart
         while x <= xEnd {

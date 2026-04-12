@@ -22,8 +22,12 @@ struct MilsimGameApp: App {
                     viewModel.reset()
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+
+                Button("Next Operation") {
+                    viewModel.nextMission()
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
             }
         }
     }
 }
-

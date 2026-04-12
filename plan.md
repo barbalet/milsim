@@ -28,6 +28,15 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Collectible bullets, rifles, pistols, blade weapons, suppressors, and magazines
 - Windowed play plus full-screen toggle support
 
+## Current Cycle 1 Status
+
+- Implemented four mission seeds: cache raid, hostage recovery, recon-and-exfil, and convoy ambush.
+- Replaced the flat arena feel with layered roads, ridges, buildings, low walls, convoy obstacles, and concealment foliage.
+- Expanded firearms with distinct recoil, muzzle velocity, suppressor compatibility, and selectable fire modes where supported.
+- Added infantry posture controls: crouch, prone, lean, and low-cover vaulting.
+- Updated the HUD and mission flow so operations can be restarted or advanced to the next seed directly in-app.
+- Remaining Cycle 1 work: deeper route variation inside each mission, more AI behaviors around compounds and search patterns, and stronger hit-reaction / suppression feedback.
+
 ## Cycle 0: Foundation and Playable Slice
 
 - Deliver a bootable macOS app with SwiftUI shell, Metal renderer, and C engine.
@@ -114,4 +123,3 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Add stance and recoil systems.
 - Add a tactical map and basic squad commands.
 - Introduce mission scripting hooks and save/load support.
-

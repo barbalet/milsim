@@ -6,7 +6,7 @@
 - Metal for rendering
 - C for the gameplay and simulation core
 
-The current build is a playable vertical slice: move through a training raid, collect military gear, fight patrols, manage magazines and ammunition, and extract once enough field items have been secured.
+The current build is a playable Cycle 1 infantry sandbox slice: run four mission seeds, move through compounds and road networks, use stance and lean to manage exposure, switch fire modes, vault low cover, collect military gear, recover objective packages, and extract.
 
 ## Controls
 
@@ -14,13 +14,25 @@ The current build is a playable vertical slice: move through a training raid, co
 - `Shift`: sprint
 - Mouse: aim
 - Left mouse or `Space`: fire / attack
-- `E`: collect nearby equipment
+- `F` or right mouse: collect nearby equipment
 - `R`: reload current firearm
-- `Q` / `Tab`: cycle equipment
+- `B`: toggle fire mode
+- `C`: crouch toggle
+- `Z`: prone toggle
+- `Q` / `E`: lean left / right
+- `V`: vault low cover
+- `Tab` or mouse wheel: cycle equipment
 - `1`: primary weapon
 - `2`: sidearm
 - `3`: blade weapon
 - `Control` + `Command` + `F`: toggle full screen
+
+## Current Cycle 1 Features
+
+- Four mission seeds: cache raid, hostage recovery, recon-and-exfil, convoy ambush
+- Layered battlefield structures rendered in Metal: ridges, roads, compounds, low walls, towers, convoy hulks, and concealment foliage
+- C simulation support for stance, lean, vaulting, fire modes, muzzle velocity, recoil, suppressor mounting, and objective extraction
+- SwiftUI HUD support for mission briefs, posture, fire mode, inventory state, and operation cycling
 
 ## Project Layout
 
@@ -29,4 +41,3 @@ The current build is a playable vertical slice: move through a training raid, co
 - `MilsimGame/Rendering`: Metal view, renderer, and shaders
 - `MilsimGame/UI`: SwiftUI game interface
 - `plan.md`: researched multi-cycle roadmap toward a deeper ARMA-like milsim
-

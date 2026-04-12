@@ -5,12 +5,14 @@ private enum HUDPalette {
     static let amber = Color(red: 0.95, green: 0.73, blue: 0.25)
     static let ink = Color(red: 0.06, green: 0.08, blue: 0.08)
     static let olive = Color(red: 0.18, green: 0.26, blue: 0.19)
+    static let slate = Color(red: 0.14, green: 0.2, blue: 0.22)
     static let alert = Color(red: 0.82, green: 0.23, blue: 0.18)
 }
 
 struct HUDOverlayView: View {
     let hud: HUDSnapshot
     let onRestart: () -> Void
+    let onNextMission: () -> Void
     let onToggleFullScreen: () -> Void
 
     var body: some View {
@@ -18,12 +20,17 @@ struct HUDOverlayView: View {
             VStack(spacing: 16) {
                 HStack(alignment: .top, spacing: 16) {
                     hudCard(title: "Mission") {
-                        Text(hud.objective)
+                        Text(hud.missionName)
+                            .font(.system(size: 21, weight: .black, design: .monospaced))
                             .foregroundStyle(HUDPalette.sand)
-                        Text(hud.event)
+                        Text(hud.missionBrief)
+                            .foregroundStyle(HUDPalette.sand.opacity(0.9))
+                        Text(hud.objective)
                             .foregroundStyle(HUDPalette.amber)
+                        Text(hud.event)
+                            .foregroundStyle(HUDPalette.sand.opacity(0.82))
                     }
-                    .frame(maxWidth: 500, alignment: .leading)
+                    .frame(maxWidth: 560, alignment: .leading)
 
                     Spacer(minLength: 16)
 
@@ -32,27 +39,29 @@ struct HUDOverlayView: View {
                             .font(.system(size: 19, weight: .bold, design: .monospaced))
                             .foregroundStyle(HUDPalette.sand)
                         Text(hud.ammo)
-                            .foregroundStyle(HUDPalette.sand.opacity(0.92))
-                        Text("\(hud.health) | \(hud.stamina)")
+                            .foregroundStyle(HUDPalette.sand.opacity(0.95))
+                        Text(hud.posture)
                             .foregroundStyle(HUDPalette.amber)
+                        Text("\(hud.health) | \(hud.stamina)")
+                            .foregroundStyle(HUDPalette.sand)
                         Text(hud.mission)
                             .foregroundStyle(HUDPalette.sand.opacity(0.8))
                     }
-                    .frame(maxWidth: 420, alignment: .leading)
+                    .frame(maxWidth: 430, alignment: .leading)
                 }
 
                 Spacer()
 
                 HStack(alignment: .bottom, spacing: 16) {
                     hudCard(title: "Controls") {
-                        Text("WASD move")
-                        Text("Shift sprint")
-                        Text("Mouse aim")
-                        Text("Left Mouse / Space fire")
-                        Text("E collect   R reload")
-                        Text("Q / Tab cycle   1 2 3 select")
+                        Text("WASD move   Shift sprint")
+                        Text("Mouse aim   Left Mouse / Space fire")
+                        Text("F or Right Mouse collect")
+                        Text("R reload   B fire mode   V vault")
+                        Text("C crouch   Z prone   Q/E lean")
+                        Text("Tab or wheel cycle   1 2 3 select")
                     }
-                    .frame(width: 250, alignment: .leading)
+                    .frame(width: 300, alignment: .leading)
 
                     Spacer(minLength: 16)
 
@@ -70,33 +79,34 @@ struct HUDOverlayView: View {
 
                         HStack(spacing: 10) {
                             Button("Restart", action: onRestart)
-                            Button("Toggle Full Screen", action: onToggleFullScreen)
+                            Button("Next Op", action: onNextMission)
+                            Button("Full Screen", action: onToggleFullScreen)
                         }
                         .buttonStyle(HUDButtonStyle())
                         .padding(.top, 8)
                     }
-                    .frame(maxWidth: 430, alignment: .leading)
+                    .frame(maxWidth: 500, alignment: .leading)
                 }
             }
 
             if hud.victory || hud.failed {
-                Color.black.opacity(0.45)
+                Color.black.opacity(0.48)
                     .ignoresSafeArea()
 
-                hudCard(title: hud.victory ? "Extraction Complete" : "Mission Failed") {
-                    Text(hud.victory ? "The raid package made it to the extraction point." : "The operator was lost during the exercise.")
+                hudCard(title: hud.victory ? "Operation Complete" : "Mission Failed") {
+                    Text(hud.victory ? "The objective package made it to extraction." : "The operator was lost before exfiltration.")
                         .foregroundStyle(HUDPalette.sand)
                     Text(hud.event)
                         .foregroundStyle(hud.victory ? HUDPalette.amber : HUDPalette.alert)
 
                     HStack(spacing: 12) {
                         Button("Restart", action: onRestart)
-                        Button("Toggle Full Screen", action: onToggleFullScreen)
+                        Button("Next Op", action: onNextMission)
                     }
                     .buttonStyle(HUDButtonStyle())
                     .padding(.top, 6)
                 }
-                .frame(width: 420)
+                .frame(width: 440)
             }
         }
         .font(.system(size: 14, weight: .medium, design: .monospaced))
@@ -115,7 +125,13 @@ struct HUDOverlayView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(HUDPalette.ink.opacity(0.78))
+                .fill(
+                    LinearGradient(
+                        colors: [HUDPalette.ink.opacity(0.82), HUDPalette.slate.opacity(0.7)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -141,4 +157,3 @@ private struct HUDButtonStyle: ButtonStyle {
             .foregroundStyle(HUDPalette.sand)
     }
 }
-

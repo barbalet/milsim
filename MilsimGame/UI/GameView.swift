@@ -11,6 +11,7 @@ struct GameView: View {
             HUDOverlayView(
                 hud: viewModel.hud,
                 onRestart: { viewModel.reset() },
+                onNextMission: { viewModel.nextMission() },
                 onToggleFullScreen: { NSApp.keyWindow?.toggleFullScreen(nil) }
             )
             .padding(22)
@@ -19,4 +20,3 @@ struct GameView: View {
         .ignoresSafeArea()
     }
 }
-
