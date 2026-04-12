@@ -50,6 +50,8 @@ struct HUDOverlayView: View {
                             .foregroundStyle(HUDPalette.blue.opacity(0.88))
                         Text(hud.presentation)
                             .foregroundStyle(HUDPalette.green.opacity(0.88))
+                        Text(hud.presentationAssist)
+                            .foregroundStyle(HUDPalette.sand.opacity(0.86))
                         Text(hud.posture)
                             .foregroundStyle(HUDPalette.amber)
                         Text(hud.health)

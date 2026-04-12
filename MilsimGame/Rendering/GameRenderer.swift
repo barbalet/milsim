@@ -27,6 +27,99 @@ private struct PerspectiveLayer {
     var instances: [RenderInstance]
 }
 
+private struct PerspectiveProjection {
+    var position: SIMD2<Float>
+    var size: SIMD2<Float>
+    var depth: Float
+    var footY: Float
+}
+
+private struct FocusOverlay {
+    var position: SIMD2<Float>
+    var size: SIMD2<Float>
+    var footY: Float
+    var color: SIMD4<Float>
+    var score: Float
+}
+
+private struct OcclusionField {
+    private static let binCount = 54
+    private static let viewMin: Float = -1.25
+    private static let viewMax: Float = 1.25
+
+    private var depths = Array(repeating: Float.greatestFiniteMagnitude, count: binCount)
+    private var strengths = Array(repeating: Float.zero, count: binCount)
+
+    mutating func register(center: Float, width: Float, depth: Float, strength: Float) {
+        guard let range = indexRange(center: center, width: width) else {
+            return
+        }
+
+        for index in range {
+            if depth < depths[index] {
+                depths[index] = depth
+            }
+            strengths[index] = max(strengths[index], strength)
+        }
+    }
+
+    func visibility(center: Float, width: Float, depth: Float, softness: Float = 26) -> Float {
+        guard let range = indexRange(center: center, width: width) else {
+            return 1.0
+        }
+
+        var blockedAmount: Float = 0
+        var sampleCount: Float = 0
+
+        for index in range {
+            let blockerDepth = depths[index]
+            if !blockerDepth.isFinite || blockerDepth + softness >= depth {
+                continue
+            }
+
+            let blockerStrength = strengths[index]
+            let depthInfluence = min(max((depth - blockerDepth - softness) / 150.0, 0.18), 1.0)
+            blockedAmount += blockerStrength * depthInfluence
+            sampleCount += 1
+        }
+
+        guard sampleCount > 0 else {
+            return 1.0
+        }
+
+        let occlusion = min(0.92, blockedAmount / sampleCount)
+        return max(0.08, 1.0 - occlusion)
+    }
+
+    func nearestDepth(around center: Float, fallback: Float) -> Float {
+        guard let range = indexRange(center: center, width: 0.16) else {
+            return fallback
+        }
+
+        var nearest = fallback
+        for index in range where strengths[index] > 0.18 {
+            nearest = min(nearest, depths[index])
+        }
+        return nearest
+    }
+
+    private func indexRange(center: Float, width: Float) -> ClosedRange<Int>? {
+        let halfWidth = max(0.02, width * 0.5)
+        let minX = max(Self.viewMin, center - halfWidth)
+        let maxX = min(Self.viewMax, center + halfWidth)
+        guard maxX >= minX else {
+            return nil
+        }
+
+        let span = Self.viewMax - Self.viewMin
+        let lower = Int(floor(((minX - Self.viewMin) / span) * Float(Self.binCount - 1)))
+        let upper = Int(ceil(((maxX - Self.viewMin) / span) * Float(Self.binCount - 1)))
+        let clampedLower = max(0, min(Self.binCount - 1, lower))
+        let clampedUpper = max(clampedLower, min(Self.binCount - 1, upper))
+        return clampedLower...clampedUpper
+    }
+}
+
 final class GameRenderer: NSObject, MTKViewDelegate {
     weak var viewModel: GameViewModel?
 
@@ -406,8 +499,17 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 sway: sway
             )
 
+            let occlusionField = buildFirstPersonOcclusionField(
+                statePointer: statePointer,
+                playerPosition: playerPosition,
+                forward: forward,
+                right: right,
+                horizon: horizon,
+                cameraOffset: cameraOffset
+            )
             var layers: [PerspectiveLayer] = []
             layers.reserveCapacity(180)
+            var focusOverlay: FocusOverlay?
 
             let structureCount = Int(game_structure_count(statePointer))
             for index in 0..<structureCount {
@@ -421,7 +523,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     forward: forward,
                     right: right,
                     horizon: horizon,
-                    cameraOffset: cameraOffset
+                    cameraOffset: cameraOffset,
+                    occlusionField: occlusionField
                 )
             }
 
@@ -437,7 +540,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     forward: forward,
                     right: right,
                     horizon: horizon,
-                    cameraOffset: cameraOffset
+                    cameraOffset: cameraOffset,
+                    occlusionField: occlusionField,
+                    focusOverlay: &focusOverlay
                 )
             }
 
@@ -453,7 +558,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     forward: forward,
                     right: right,
                     horizon: horizon,
-                    cameraOffset: cameraOffset
+                    cameraOffset: cameraOffset,
+                    occlusionField: occlusionField,
+                    focusOverlay: &focusOverlay
                 )
             }
 
@@ -469,7 +576,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     forward: forward,
                     right: right,
                     horizon: horizon,
-                    cameraOffset: cameraOffset
+                    cameraOffset: cameraOffset,
+                    occlusionField: occlusionField
                 )
             }
 
@@ -485,7 +593,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     forward: forward,
                     right: right,
                     horizon: horizon,
-                    cameraOffset: cameraOffset
+                    cameraOffset: cameraOffset,
+                    occlusionField: occlusionField
                 )
             }
 
@@ -494,8 +603,28 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 instances.append(contentsOf: layer.instances)
             }
 
-            addFirstPersonReticle(to: &instances, player: player)
-            addWeaponViewModel(to: &instances, statePointer: statePointer, sway: sway, cameraOffset: cameraOffset)
+            if let focusOverlay {
+                addFocusOverlay(to: &instances, focusOverlay: focusOverlay)
+            }
+
+            let selectedIndex = Int(game_selected_inventory_index(statePointer))
+            let selectedItem = selectedIndex >= 0 ? game_inventory_item_at(statePointer, selectedIndex)?.pointee : nil
+            let targetDepth = occlusionField.nearestDepth(around: -cameraOffset * 0.2, fallback: 420.0)
+
+            addFirstPersonReticle(
+                to: &instances,
+                player: player,
+                selectedItem: selectedItem,
+                cameraOffset: cameraOffset
+            )
+            addWeaponViewModel(
+                to: &instances,
+                statePointer: statePointer,
+                sway: sway,
+                cameraOffset: cameraOffset,
+                horizon: horizon,
+                targetDepth: targetDepth
+            )
         }
 
         return instances
@@ -612,7 +741,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                                          forward: SIMD2<Float>,
                                          right: SIMD2<Float>,
                                          horizon: Float,
-                                         cameraOffset: Float) {
+                                         cameraOffset: Float,
+                                         occlusionField: OcclusionField) {
         let position = SIMD2<Float>(structure.position.x, structure.position.y)
         let screen = projectFootprint(
             worldPosition: position,
@@ -628,13 +758,18 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             return
         }
 
+        let visibility = occlusionField.visibility(center: screen.position.x, width: screen.size.x * 1.1, depth: screen.depth, softness: 34)
+        if visibility < 0.06 {
+            return
+        }
+
         var layerInstances: [RenderInstance] = []
         let shadowWidth = max(0.05, screen.size.x * 0.8)
         layerInstances.append(
             makeInstance(
                 position: SIMD2<Float>(screen.position.x, screen.footY - 0.02),
                 size: SIMD2<Float>(shadowWidth, 0.04),
-                color: SIMD4<Float>(0.04, 0.04, 0.04, 0.25),
+                color: alphaAdjusted(SIMD4<Float>(0.04, 0.04, 0.04, 0.25), factor: visibility, minimumAlpha: 0.03),
                 rotation: 0,
                 shape: .circle
             )
@@ -642,27 +777,27 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
         switch structure.kind {
         case StructureKind_Ridge:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(1.25, 0.72), color: SIMD4<Float>(0.29, 0.27, 0.18, 0.84), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(1.25, 0.72), color: alphaAdjusted(SIMD4<Float>(0.29, 0.27, 0.18, 0.84), factor: visibility, minimumAlpha: 0.14), rotation: 0, shape: .rectangle))
         case StructureKind_Road:
             let roadHeight = max(0.03, screen.size.y * 0.12)
-            layerInstances.append(makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY + 0.015), size: SIMD2<Float>(max(0.2, screen.size.x * 1.45), roadHeight), color: SIMD4<Float>(0.18, 0.19, 0.19, 0.62), rotation: 0, shape: .rectangle))
-            layerInstances.append(makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY + 0.016), size: SIMD2<Float>(max(0.04, screen.size.x * 0.18), max(0.01, roadHeight * 0.28)), color: SIMD4<Float>(0.8, 0.74, 0.42, 0.4), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY + 0.015), size: SIMD2<Float>(max(0.2, screen.size.x * 1.45), roadHeight), color: alphaAdjusted(SIMD4<Float>(0.18, 0.19, 0.19, 0.62), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY + 0.016), size: SIMD2<Float>(max(0.04, screen.size.x * 0.18), max(0.01, roadHeight * 0.28)), color: alphaAdjusted(SIMD4<Float>(0.8, 0.74, 0.42, 0.4), factor: visibility, minimumAlpha: 0.05), rotation: 0, shape: .rectangle))
         case StructureKind_TreeCluster:
-            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(-screen.size.x * 0.12, -screen.size.y * 0.08), size: screen.size * SIMD2<Float>(0.86, 1.08), color: SIMD4<Float>(0.16, 0.42, 0.2, 0.78), rotation: 0, shape: .circle))
-            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(screen.size.x * 0.16, -screen.size.y * 0.16), size: screen.size * SIMD2<Float>(0.66, 0.88), color: SIMD4<Float>(0.1, 0.31, 0.14, 0.7), rotation: 0, shape: .circle))
+            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(-screen.size.x * 0.12, -screen.size.y * 0.08), size: screen.size * SIMD2<Float>(0.86, 1.08), color: alphaAdjusted(SIMD4<Float>(0.16, 0.42, 0.2, 0.78), factor: visibility, minimumAlpha: 0.12), rotation: 0, shape: .circle))
+            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(screen.size.x * 0.16, -screen.size.y * 0.16), size: screen.size * SIMD2<Float>(0.66, 0.88), color: alphaAdjusted(SIMD4<Float>(0.1, 0.31, 0.14, 0.7), factor: visibility, minimumAlpha: 0.12), rotation: 0, shape: .circle))
         case StructureKind_Building:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size, color: SIMD4<Float>(0.48, 0.46, 0.4, 0.94), rotation: 0, shape: .rectangle))
-            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, screen.size.y * 0.04), size: screen.size * SIMD2<Float>(0.84, 0.68), color: SIMD4<Float>(0.21, 0.23, 0.22, 0.78), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size, color: alphaAdjusted(SIMD4<Float>(0.48, 0.46, 0.4, 0.94), factor: visibility, minimumAlpha: 0.18), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, screen.size.y * 0.04), size: screen.size * SIMD2<Float>(0.84, 0.68), color: alphaAdjusted(SIMD4<Float>(0.21, 0.23, 0.22, 0.78), factor: visibility, minimumAlpha: 0.14), rotation: 0, shape: .rectangle))
         case StructureKind_LowWall:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(1.05, 0.55), color: SIMD4<Float>(0.7, 0.67, 0.56, 0.95), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(1.05, 0.55), color: alphaAdjusted(SIMD4<Float>(0.7, 0.67, 0.56, 0.95), factor: visibility, minimumAlpha: 0.18), rotation: 0, shape: .rectangle))
         case StructureKind_Tower:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.72, 1.18), color: SIMD4<Float>(0.54, 0.5, 0.4, 0.94), rotation: 0, shape: .rectangle))
-            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.26), size: screen.size * SIMD2<Float>(0.98, 0.18), color: SIMD4<Float>(0.27, 0.24, 0.19, 0.84), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.72, 1.18), color: alphaAdjusted(SIMD4<Float>(0.54, 0.5, 0.4, 0.94), factor: visibility, minimumAlpha: 0.18), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.26), size: screen.size * SIMD2<Float>(0.98, 0.18), color: alphaAdjusted(SIMD4<Float>(0.27, 0.24, 0.19, 0.84), factor: visibility, minimumAlpha: 0.12), rotation: 0, shape: .rectangle))
         case StructureKind_Convoy:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(1.02, 0.72), color: SIMD4<Float>(0.24, 0.28, 0.25, 0.94), rotation: 0, shape: .rectangle))
-            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, screen.size.y * 0.05), size: screen.size * SIMD2<Float>(0.66, 0.32), color: SIMD4<Float>(0.1, 0.11, 0.11, 0.86), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(1.02, 0.72), color: alphaAdjusted(SIMD4<Float>(0.24, 0.28, 0.25, 0.94), factor: visibility, minimumAlpha: 0.18), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, screen.size.y * 0.05), size: screen.size * SIMD2<Float>(0.66, 0.32), color: alphaAdjusted(SIMD4<Float>(0.1, 0.11, 0.11, 0.86), factor: visibility, minimumAlpha: 0.12), rotation: 0, shape: .rectangle))
         case StructureKind_Door:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.7, 0.94), color: SIMD4<Float>(0.76, 0.69, 0.53, 0.88), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.7, 0.94), color: alphaAdjusted(SIMD4<Float>(0.76, 0.69, 0.53, 0.88), factor: visibility, minimumAlpha: 0.14), rotation: 0, shape: .rectangle))
         default:
             break
         }
@@ -678,7 +813,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                                             forward: SIMD2<Float>,
                                             right: SIMD2<Float>,
                                             horizon: Float,
-                                            cameraOffset: Float) {
+                                            cameraOffset: Float,
+                                            occlusionField: OcclusionField,
+                                            focusOverlay: inout FocusOverlay?) {
         let position = SIMD2<Float>(interactable.position.x, interactable.position.y)
         let screen = projectFootprint(
             worldPosition: position,
@@ -694,9 +831,18 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             return
         }
 
-        let color = interactableColor(kind: interactable.kind, toggled: interactable.toggled, singleUse: interactable.singleUse)
+        let visibility = occlusionField.visibility(center: screen.position.x, width: screen.size.x * 1.05, depth: screen.depth)
+        if visibility < 0.08 {
+            return
+        }
+
+        let color = alphaAdjusted(
+            interactableColor(kind: interactable.kind, toggled: interactable.toggled, singleUse: interactable.singleUse),
+            factor: visibility,
+            minimumAlpha: 0.08
+        )
         var layerInstances: [RenderInstance] = [
-            makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY - 0.014), size: SIMD2<Float>(max(0.03, screen.size.x * 0.52), 0.03), color: SIMD4<Float>(0.04, 0.04, 0.04, 0.22), rotation: 0, shape: .circle)
+            makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY - 0.014), size: SIMD2<Float>(max(0.03, screen.size.x * 0.52), 0.03), color: alphaAdjusted(SIMD4<Float>(0.04, 0.04, 0.04, 0.22), factor: visibility, minimumAlpha: 0.03), rotation: 0, shape: .circle)
         ]
 
         switch interactable.kind {
@@ -704,19 +850,29 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.74, 0.9), color: color, rotation: 0, shape: .rectangle))
         case InteractableKind_SupplyCrate:
             layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.86, 0.54), color: color, rotation: 0, shape: .rectangle))
-            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.08), size: screen.size * SIMD2<Float>(0.26, 0.46), color: SIMD4<Float>(0.92, 0.93, 0.95, 0.72), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.08), size: screen.size * SIMD2<Float>(0.26, 0.46), color: alphaAdjusted(SIMD4<Float>(0.92, 0.93, 0.95, 0.72), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
         case InteractableKind_DeadDrop:
             layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.8, 0.44), color: color, rotation: 0, shape: .circle))
         case InteractableKind_Radio:
             layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.56, 0.74), color: color, rotation: 0, shape: .rectangle))
-            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.24), size: screen.size * SIMD2<Float>(0.08, 0.44), color: SIMD4<Float>(0.92, 0.95, 0.93, 0.74), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.24), size: screen.size * SIMD2<Float>(0.08, 0.44), color: alphaAdjusted(SIMD4<Float>(0.92, 0.95, 0.93, 0.74), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
         case InteractableKind_EmplacedWeapon:
             layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, screen.size.y * 0.04), size: screen.size * SIMD2<Float>(0.9, 0.18), color: color, rotation: 0, shape: .rectangle))
-            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(screen.size.x * 0.16, -screen.size.y * 0.1), size: screen.size * SIMD2<Float>(0.42, 0.08), color: SIMD4<Float>(0.16, 0.16, 0.16, 0.9), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(screen.size.x * 0.16, -screen.size.y * 0.1), size: screen.size * SIMD2<Float>(0.42, 0.08), color: alphaAdjusted(SIMD4<Float>(0.16, 0.16, 0.16, 0.9), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
         default:
             break
         }
 
+        registerFocusOverlay(
+            &focusOverlay,
+            position: screen.position,
+            size: screen.size,
+            footY: screen.footY,
+            color: color,
+            depth: screen.depth,
+            centeredness: abs(screen.position.x),
+            visibility: visibility
+        )
         layers.append(PerspectiveLayer(depth: screen.depth, instances: layerInstances))
     }
 
@@ -726,7 +882,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                                     forward: SIMD2<Float>,
                                     right: SIMD2<Float>,
                                     horizon: Float,
-                                    cameraOffset: Float) {
+                                    cameraOffset: Float,
+                                    occlusionField: OcclusionField,
+                                    focusOverlay: inout FocusOverlay?) {
         let position = SIMD2<Float>(item.position.x, item.position.y)
         let screen = projectFootprint(
             worldPosition: position,
@@ -742,30 +900,57 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             return
         }
 
+        let visibility = occlusionField.visibility(center: screen.position.x, width: screen.size.x * 1.1, depth: screen.depth, softness: 20)
+        if visibility < 0.08 {
+            return
+        }
+
         var layerInstances: [RenderInstance] = [
-            makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY - 0.01), size: SIMD2<Float>(max(0.022, screen.size.x * 0.44), 0.024), color: SIMD4<Float>(0.02, 0.02, 0.02, 0.22), rotation: 0, shape: .circle)
+            makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY - 0.01), size: SIMD2<Float>(max(0.022, screen.size.x * 0.44), 0.024), color: alphaAdjusted(SIMD4<Float>(0.02, 0.02, 0.02, 0.22), factor: visibility, minimumAlpha: 0.03), rotation: 0, shape: .circle)
         ]
 
         switch item.kind {
         case ItemKind_BulletBox:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.88, 0.52), color: ammoColor(item.ammoType), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.88, 0.52), color: alphaAdjusted(ammoColor(item.ammoType), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
         case ItemKind_Magazine:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.42, 0.92), color: SIMD4<Float>(0.93, 0.53, 0.18, 0.96), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.42, 0.92), color: alphaAdjusted(SIMD4<Float>(0.93, 0.53, 0.18, 0.96), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
         case ItemKind_Gun:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(1.22, 0.28), color: SIMD4<Float>(0.36, 0.82, 0.86, 0.96), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(1.22, 0.28), color: alphaAdjusted(SIMD4<Float>(0.36, 0.82, 0.86, 0.96), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
         case ItemKind_Blade:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.28, 1.08), color: SIMD4<Float>(0.85, 0.86, 0.9, 0.96), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.28, 1.08), color: alphaAdjusted(SIMD4<Float>(0.85, 0.86, 0.9, 0.96), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
         case ItemKind_Attachment:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.84, 0.5), color: SIMD4<Float>(0.28, 0.82, 0.52, 0.96), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.84, 0.5), color: alphaAdjusted(SIMD4<Float>(0.28, 0.82, 0.52, 0.96), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
         case ItemKind_Medkit:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.72, 0.72), color: SIMD4<Float>(0.92, 0.24, 0.18, 0.96), rotation: 0, shape: .rectangle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.72, 0.72), color: alphaAdjusted(SIMD4<Float>(0.92, 0.24, 0.18, 0.96), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .rectangle))
         case ItemKind_Objective:
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.84, 0.84), color: SIMD4<Float>(0.96, 0.88, 0.24, 0.92), rotation: 0, shape: .ring))
-            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.4, 0.4), color: SIMD4<Float>(0.98, 0.92, 0.42, 0.95), rotation: 0, shape: .circle))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.84, 0.84), color: alphaAdjusted(SIMD4<Float>(0.96, 0.88, 0.24, 0.92), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .ring))
+            layerInstances.append(makeInstance(position: screen.position, size: screen.size * SIMD2<Float>(0.4, 0.4), color: alphaAdjusted(SIMD4<Float>(0.98, 0.92, 0.42, 0.95), factor: visibility, minimumAlpha: 0.08), rotation: 0, shape: .circle))
         default:
             break
         }
 
+        let highlightColor: SIMD4<Float>
+        switch item.kind {
+        case ItemKind_Objective:
+            highlightColor = SIMD4<Float>(0.98, 0.9, 0.34, 0.88)
+        case ItemKind_Medkit:
+            highlightColor = SIMD4<Float>(0.96, 0.32, 0.24, 0.88)
+        case ItemKind_Attachment:
+            highlightColor = SIMD4<Float>(0.3, 0.86, 0.54, 0.88)
+        default:
+            highlightColor = SIMD4<Float>(0.94, 0.84, 0.3, 0.82)
+        }
+
+        registerFocusOverlay(
+            &focusOverlay,
+            position: screen.position,
+            size: screen.size,
+            footY: screen.footY,
+            color: alphaAdjusted(highlightColor, factor: visibility, minimumAlpha: 0.12),
+            depth: screen.depth,
+            centeredness: abs(screen.position.x),
+            visibility: visibility
+        )
         layers.append(PerspectiveLayer(depth: screen.depth, instances: layerInstances))
     }
 
@@ -775,7 +960,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                                      forward: SIMD2<Float>,
                                      right: SIMD2<Float>,
                                      horizon: Float,
-                                     cameraOffset: Float) {
+                                     cameraOffset: Float,
+                                     occlusionField: OcclusionField) {
         let position = SIMD2<Float>(enemy.position.x, enemy.position.y)
         let screen = projectFootprint(
             worldPosition: position,
@@ -791,14 +977,19 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             return
         }
 
+        let visibility = occlusionField.visibility(center: screen.position.x, width: screen.size.x * 0.92, depth: screen.depth, softness: 18)
+        if visibility < 0.1 {
+            return
+        }
+
         let healthFactor = max(0.22, enemy.health / 100)
         let flash: Float = enemy.hitTimer > 0 ? 0.22 : 0
-        let bodyColor = SIMD4<Float>(0.72 + flash, 0.2 + (0.28 * healthFactor), 0.15, 0.96)
+        let bodyColor = alphaAdjusted(SIMD4<Float>(0.72 + flash, 0.2 + (0.28 * healthFactor), 0.15, 0.96), factor: visibility, minimumAlpha: 0.1)
         var layerInstances: [RenderInstance] = []
-        layerInstances.append(makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY - 0.008), size: SIMD2<Float>(max(0.04, screen.size.x * 0.56), 0.04), color: SIMD4<Float>(0.02, 0.02, 0.02, 0.24), rotation: 0, shape: .circle))
+        layerInstances.append(makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY - 0.008), size: SIMD2<Float>(max(0.04, screen.size.x * 0.56), 0.04), color: alphaAdjusted(SIMD4<Float>(0.02, 0.02, 0.02, 0.24), factor: visibility, minimumAlpha: 0.03), rotation: 0, shape: .circle))
         layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, screen.size.y * 0.1), size: screen.size * SIMD2<Float>(0.42, 0.52), color: bodyColor, rotation: 0, shape: .rectangle))
         layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.28), size: screen.size * SIMD2<Float>(0.26, 0.26), color: bodyColor, rotation: 0, shape: .circle))
-        layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.54), size: SIMD2<Float>(max(0.08, screen.size.x * 0.7 * healthFactor), max(0.012, screen.size.y * 0.08)), color: SIMD4<Float>(0.95, 0.78, 0.2, 0.86), rotation: 0, shape: .rectangle))
+        layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.54), size: SIMD2<Float>(max(0.08, screen.size.x * 0.7 * healthFactor), max(0.012, screen.size.y * 0.08)), color: alphaAdjusted(SIMD4<Float>(0.95, 0.78, 0.2, 0.86), factor: visibility, minimumAlpha: 0.06), rotation: 0, shape: .rectangle))
         layers.append(PerspectiveLayer(depth: screen.depth, instances: layerInstances))
     }
 
@@ -808,7 +999,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                                           forward: SIMD2<Float>,
                                           right: SIMD2<Float>,
                                           horizon: Float,
-                                          cameraOffset: Float) {
+                                          cameraOffset: Float,
+                                          occlusionField: OcclusionField) {
         let position = SIMD2<Float>(projectile.position.x, projectile.position.y)
         guard let screen = projectFootprint(
             worldPosition: position,
@@ -826,9 +1018,13 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         let velocity = SIMD2<Float>(projectile.velocity.x, projectile.velocity.y)
         let lateralVelocity = simd_dot(velocity, right)
         let stretch = max(0.03, min(0.16, simd_length(velocity) / 5200))
+        let visibility = occlusionField.visibility(center: screen.position.x, width: max(0.04, stretch), depth: screen.depth, softness: 12)
+        if visibility < 0.1 {
+            return
+        }
         let color = projectile.fromPlayer
-            ? SIMD4<Float>(0.96, 0.87, 0.3, 0.92)
-            : SIMD4<Float>(0.95, 0.34, 0.2, 0.9)
+            ? alphaAdjusted(SIMD4<Float>(0.96, 0.87, 0.3, 0.92), factor: visibility, minimumAlpha: 0.08)
+            : alphaAdjusted(SIMD4<Float>(0.95, 0.34, 0.2, 0.9), factor: visibility, minimumAlpha: 0.08)
         let rotation: Float = lateralVelocity > 0 ? 0.12 : -0.12
         layers.append(
             PerspectiveLayer(
@@ -840,19 +1036,37 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         )
     }
 
-    private func addFirstPersonReticle(to instances: inout [RenderInstance], player: Player) {
+    private func addFirstPersonReticle(to instances: inout [RenderInstance],
+                                       player: Player,
+                                       selectedItem: InventoryItem?,
+                                       cameraOffset: Float) {
+        let center = SIMD2<Float>(-cameraOffset * 0.1, 0.02 + min(player.fireCooldown * 0.18, 0.02))
         let reticleColor = SIMD4<Float>(0.9, 0.92, 0.95, 0.62 + min(player.suppression / 180, 0.18))
         let spread = 0.022 + min(player.pain / 1200, 0.035) + min(player.suppression / 1600, 0.05)
-        instances.append(makeInstance(position: SIMD2<Float>(0, 0.02), size: SIMD2<Float>(0.008, 0.09), color: reticleColor, rotation: 0, shape: .rectangle))
-        instances.append(makeInstance(position: SIMD2<Float>(0, 0.02), size: SIMD2<Float>(0.09, 0.008), color: reticleColor, rotation: 0, shape: .rectangle))
-        instances.append(makeInstance(position: SIMD2<Float>(-spread, 0.02), size: SIMD2<Float>(0.028, 0.006), color: reticleColor, rotation: 0, shape: .rectangle))
-        instances.append(makeInstance(position: SIMD2<Float>(spread, 0.02), size: SIMD2<Float>(0.028, 0.006), color: reticleColor, rotation: 0, shape: .rectangle))
+
+        if let selectedItem, selectedItem.kind == ItemKind_Gun, selectedItem.opticMounted {
+            instances.append(makeInstance(position: center, size: SIMD2<Float>(0.26, 0.26), color: SIMD4<Float>(0.05, 0.06, 0.07, 0.28), rotation: 0, shape: .ring))
+            instances.append(makeInstance(position: center, size: SIMD2<Float>(0.18, 0.18), color: SIMD4<Float>(0.08, 0.1, 0.12, 0.18), rotation: 0, shape: .ring))
+            instances.append(makeInstance(position: center, size: SIMD2<Float>(0.012, 0.012), color: SIMD4<Float>(0.98, 0.2, 0.18, 0.82), rotation: 0, shape: .circle))
+            instances.append(makeInstance(position: center, size: SIMD2<Float>(0.006, 0.08), color: reticleColor, rotation: 0, shape: .rectangle))
+            instances.append(makeInstance(position: center, size: SIMD2<Float>(0.08, 0.006), color: reticleColor, rotation: 0, shape: .rectangle))
+        } else {
+            instances.append(makeInstance(position: center, size: SIMD2<Float>(0.008, 0.09), color: reticleColor, rotation: 0, shape: .rectangle))
+            instances.append(makeInstance(position: center, size: SIMD2<Float>(0.09, 0.008), color: reticleColor, rotation: 0, shape: .rectangle))
+            instances.append(makeInstance(position: center + SIMD2<Float>(-spread, 0), size: SIMD2<Float>(0.028, 0.006), color: reticleColor, rotation: 0, shape: .rectangle))
+            instances.append(makeInstance(position: center + SIMD2<Float>(spread, 0), size: SIMD2<Float>(0.028, 0.006), color: reticleColor, rotation: 0, shape: .rectangle))
+            instances.append(makeInstance(position: center + SIMD2<Float>(0, 0.06), size: SIMD2<Float>(0.018, 0.07), color: SIMD4<Float>(0.95, 0.88, 0.78, 0.42), rotation: 0, shape: .rectangle))
+            instances.append(makeInstance(position: center + SIMD2<Float>(-0.03, 0.045), size: SIMD2<Float>(0.014, 0.006), color: SIMD4<Float>(0.95, 0.88, 0.78, 0.36), rotation: 0, shape: .rectangle))
+            instances.append(makeInstance(position: center + SIMD2<Float>(0.03, 0.045), size: SIMD2<Float>(0.014, 0.006), color: SIMD4<Float>(0.95, 0.88, 0.78, 0.36), rotation: 0, shape: .rectangle))
+        }
     }
 
     private func addWeaponViewModel(to instances: inout [RenderInstance],
                                     statePointer: UnsafePointer<GameState>,
                                     sway: Float,
-                                    cameraOffset: Float) {
+                                    cameraOffset: Float,
+                                    horizon: Float,
+                                    targetDepth: Float) {
         let selectedIndex = Int(game_selected_inventory_index(statePointer))
         guard selectedIndex >= 0, let selectedItem = game_inventory_item_at(statePointer, selectedIndex)?.pointee else {
             return
@@ -860,7 +1074,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
         let player = statePointer.pointee.player
         let recoil = min(0.12, player.fireCooldown * 0.38)
-        let base = SIMD2<Float>(0.42 + cameraOffset * 0.55, 0.74 + recoil + abs(sway) * 0.22)
+        let opticOffset: Float = (selectedItem.kind == ItemKind_Gun && selectedItem.opticMounted) ? -0.08 : 0.0
+        let base = SIMD2<Float>(0.42 + cameraOffset * 0.55 + opticOffset, 0.74 + recoil + abs(sway) * 0.22)
         let armColor = SIMD4<Float>(0.22, 0.24, 0.24, 0.92)
         instances.append(makeInstance(position: SIMD2<Float>(base.x - 0.16, 0.9), size: SIMD2<Float>(0.28, 0.22), color: armColor, rotation: 0.2, shape: .rectangle))
         instances.append(makeInstance(position: SIMD2<Float>(base.x + 0.04, 0.94), size: SIMD2<Float>(0.3, 0.24), color: armColor, rotation: -0.08, shape: .rectangle))
@@ -875,16 +1090,31 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
             if selectedItem.opticMounted {
                 instances.append(makeInstance(position: base + SIMD2<Float>(0.02, -0.1), size: SIMD2<Float>(0.12, 0.07), color: SIMD4<Float>(0.22, 0.25, 0.28, 0.96), rotation: 0, shape: .rectangle))
+                instances.append(makeInstance(position: base + SIMD2<Float>(0.14, -0.1), size: SIMD2<Float>(0.08, 0.07), color: SIMD4<Float>(0.12, 0.14, 0.16, 0.96), rotation: 0, shape: .rectangle))
             }
             if selectedItem.suppressed {
                 instances.append(makeInstance(position: base + SIMD2<Float>(0.39, -0.04), size: SIMD2<Float>(0.14, 0.04), color: SIMD4<Float>(0.17, 0.18, 0.2, 0.94), rotation: -0.02, shape: .rectangle))
             }
             if selectedItem.laserMounted {
                 instances.append(makeInstance(position: base + SIMD2<Float>(0.1, -0.005), size: SIMD2<Float>(0.08, 0.04), color: SIMD4<Float>(0.18, 0.24, 0.18, 0.94), rotation: 0, shape: .rectangle))
-                instances.append(makeInstance(position: SIMD2<Float>(0.06, 0.02), size: SIMD2<Float>(0.7, 0.004), color: SIMD4<Float>(0.92, 0.16, 0.16, 0.12), rotation: 0, shape: .rectangle))
+                let laserTarget = SIMD2<Float>(-cameraOffset * 0.1, 0.02)
+                let beamVector = laserTarget - (base + SIMD2<Float>(0.18, -0.02))
+                let beamLength = simd_length(beamVector)
+                if beamLength > 0.01 {
+                    let beamMidpoint = (base + SIMD2<Float>(0.18, -0.02) + laserTarget) * 0.5
+                    let beamRotation = atan2f(beamVector.y, beamVector.x)
+                    instances.append(makeInstance(position: beamMidpoint, size: SIMD2<Float>(beamLength, 0.004), color: SIMD4<Float>(0.92, 0.16, 0.16, 0.18), rotation: beamRotation, shape: .rectangle))
+                }
+                let laserDotSize = max(0.012, 0.03 - min(targetDepth / 2400.0, 0.016))
+                instances.append(makeInstance(position: laserTarget, size: SIMD2<Float>(laserDotSize, laserDotSize), color: SIMD4<Float>(0.98, 0.2, 0.18, 0.72), rotation: 0, shape: .circle))
             }
             if selectedItem.lightMounted {
                 instances.append(makeInstance(position: base + SIMD2<Float>(0.13, 0.038), size: SIMD2<Float>(0.06, 0.03), color: SIMD4<Float>(0.72, 0.76, 0.68, 0.96), rotation: 0, shape: .rectangle))
+                let beamCenter = SIMD2<Float>(-cameraOffset * 0.12, max(horizon + 0.14, 0.08))
+                let hotspotSize = max(0.12, 0.34 - min(targetDepth / 2600.0, 0.12))
+                instances.append(makeInstance(position: beamCenter + SIMD2<Float>(0, 0.08), size: SIMD2<Float>(0.92, 0.26), color: SIMD4<Float>(0.92, 0.9, 0.72, 0.06), rotation: 0, shape: .rectangle))
+                instances.append(makeInstance(position: beamCenter + SIMD2<Float>(0, 0.02), size: SIMD2<Float>(0.56, 0.18), color: SIMD4<Float>(0.96, 0.94, 0.76, 0.09), rotation: 0, shape: .rectangle))
+                instances.append(makeInstance(position: SIMD2<Float>(-cameraOffset * 0.08, 0.03), size: SIMD2<Float>(hotspotSize, hotspotSize), color: SIMD4<Float>(0.98, 0.96, 0.84, 0.1), rotation: 0, shape: .circle))
             }
             if selectedItem.underbarrelMounted {
                 instances.append(makeInstance(position: base + SIMD2<Float>(0.03, 0.1), size: SIMD2<Float>(0.06, 0.12), color: SIMD4<Float>(0.2, 0.22, 0.22, 0.96), rotation: 0.02, shape: .rectangle))
@@ -902,6 +1132,144 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         default:
             instances.append(makeInstance(position: base + SIMD2<Float>(0.06, 0.01), size: SIMD2<Float>(0.18, 0.14), color: SIMD4<Float>(0.32, 0.38, 0.3, 0.96), rotation: -0.04, shape: .rectangle))
         }
+    }
+
+    private func buildFirstPersonOcclusionField(statePointer: UnsafePointer<GameState>,
+                                                playerPosition: SIMD2<Float>,
+                                                forward: SIMD2<Float>,
+                                                right: SIMD2<Float>,
+                                                horizon: Float,
+                                                cameraOffset: Float) -> OcclusionField {
+        var field = OcclusionField()
+
+        let structureCount = Int(game_structure_count(statePointer))
+        for index in 0..<structureCount {
+            guard let structure = game_structure_at(statePointer, index)?.pointee else {
+                continue
+            }
+
+            let strength = occlusionStrength(for: structure)
+            if strength <= 0.05 {
+                continue
+            }
+
+            guard let screen = projectFootprint(
+                worldPosition: SIMD2<Float>(structure.position.x, structure.position.y),
+                width: structure.size.x,
+                height: firstPersonHeight(for: structure),
+                playerPosition: playerPosition,
+                forward: forward,
+                right: right,
+                horizon: horizon,
+                cameraOffset: cameraOffset
+            ) else {
+                continue
+            }
+
+            field.register(center: screen.position.x, width: screen.size.x * occlusionWidthScale(for: structure), depth: screen.depth, strength: strength)
+        }
+
+        let interactableCount = Int(game_interactable_count(statePointer))
+        for index in 0..<interactableCount {
+            guard let interactable = game_interactable_at(statePointer, index)?.pointee else {
+                continue
+            }
+
+            let strength = occlusionStrength(for: interactable)
+            if strength <= 0.05 {
+                continue
+            }
+
+            guard let screen = projectFootprint(
+                worldPosition: SIMD2<Float>(interactable.position.x, interactable.position.y),
+                width: interactable.size.x,
+                height: firstPersonHeight(for: interactable),
+                playerPosition: playerPosition,
+                forward: forward,
+                right: right,
+                horizon: horizon,
+                cameraOffset: cameraOffset
+            ) else {
+                continue
+            }
+
+            field.register(center: screen.position.x, width: screen.size.x * 1.05, depth: screen.depth, strength: strength)
+        }
+
+        return field
+    }
+
+    private func occlusionStrength(for structure: Structure) -> Float {
+        switch structure.kind {
+        case StructureKind_Building:
+            return 0.96
+        case StructureKind_Convoy:
+            return 0.9
+        case StructureKind_LowWall:
+            return 0.78
+        case StructureKind_Door:
+            return structure.blocksProjectiles ? 0.74 : 0.18
+        case StructureKind_Ridge:
+            return 0.72
+        case StructureKind_Tower:
+            return 0.66
+        case StructureKind_TreeCluster:
+            return 0.42
+        default:
+            return 0.0
+        }
+    }
+
+    private func occlusionWidthScale(for structure: Structure) -> Float {
+        switch structure.kind {
+        case StructureKind_Ridge, StructureKind_Convoy, StructureKind_Building:
+            return 1.18
+        case StructureKind_TreeCluster:
+            return 1.1
+        default:
+            return 1.0
+        }
+    }
+
+    private func occlusionStrength(for interactable: Interactable) -> Float {
+        switch interactable.kind {
+        case InteractableKind_Door:
+            return interactable.toggled ? 0.16 : 0.68
+        case InteractableKind_SupplyCrate:
+            return 0.34
+        case InteractableKind_EmplacedWeapon:
+            return 0.24
+        case InteractableKind_Radio:
+            return 0.18
+        default:
+            return 0.0
+        }
+    }
+
+    private func registerFocusOverlay(_ focusOverlay: inout FocusOverlay?,
+                                      position: SIMD2<Float>,
+                                      size: SIMD2<Float>,
+                                      footY: Float,
+                                      color: SIMD4<Float>,
+                                      depth: Float,
+                                      centeredness: Float,
+                                      visibility: Float) {
+        guard depth < 170, centeredness < 0.68, visibility > 0.22 else {
+            return
+        }
+
+        let score = depth + centeredness * 180.0
+        if let existing = focusOverlay, existing.score <= score {
+            return
+        }
+
+        focusOverlay = FocusOverlay(position: position, size: size, footY: footY, color: color, score: score)
+    }
+
+    private func addFocusOverlay(to instances: inout [RenderInstance], focusOverlay: FocusOverlay) {
+        let highlightColor = alphaAdjusted(focusOverlay.color, factor: 1.0, minimumAlpha: 0.18)
+        instances.append(makeInstance(position: focusOverlay.position, size: focusOverlay.size * SIMD2<Float>(1.34, 1.18), color: SIMD4<Float>(highlightColor.x, highlightColor.y, highlightColor.z, 0.62), rotation: 0, shape: .ring))
+        instances.append(makeInstance(position: SIMD2<Float>(focusOverlay.position.x, focusOverlay.footY + 0.05), size: SIMD2<Float>(max(0.08, focusOverlay.size.x * 0.72), 0.014), color: SIMD4<Float>(highlightColor.x, highlightColor.y, highlightColor.z, 0.7), rotation: 0, shape: .rectangle))
     }
 
     private func normalizedAim(for player: Player) -> SIMD2<Float> {
@@ -1031,6 +1399,12 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    private func alphaAdjusted(_ color: SIMD4<Float>, factor: Float, minimumAlpha: Float) -> SIMD4<Float> {
+        var adjusted = color
+        adjusted.w = max(minimumAlpha, min(1.0, color.w * factor))
+        return adjusted
+    }
+
     private func projectFootprint(worldPosition: SIMD2<Float>,
                                   width: Float,
                                   height: Float,
@@ -1038,7 +1412,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                                   forward: SIMD2<Float>,
                                   right: SIMD2<Float>,
                                   horizon: Float,
-                                  cameraOffset: Float) -> (position: SIMD2<Float>, size: SIMD2<Float>, depth: Float, footY: Float)? {
+                                  cameraOffset: Float) -> PerspectiveProjection? {
         let delta = worldPosition - playerPosition
         let depth = simd_dot(delta, forward)
         guard depth > 28, depth < 1400 else {
@@ -1056,7 +1430,12 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         let screenHeight = min(1.85, max(0.02, height * scale))
         let footY = horizon + min(0.84, 92 / depth)
         let centerY = footY - screenHeight * 0.5
-        return (SIMD2<Float>(screenX, centerY), SIMD2<Float>(screenWidth, screenHeight), depth, footY)
+        return PerspectiveProjection(
+            position: SIMD2<Float>(screenX, centerY),
+            size: SIMD2<Float>(screenWidth, screenHeight),
+            depth: depth,
+            footY: footY
+        )
     }
 
     private func makeInstance(position: SIMD2<Float>, size: SIMD2<Float>, color: SIMD4<Float>, rotation: Float, shape: RenderShape) -> RenderInstance {

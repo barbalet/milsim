@@ -73,6 +73,12 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Projected structures, interactables, items, enemies, tracers, and a held-weapon silhouette into a forward-facing Metal scene with a basic horizon, reticle, and stance-aware camera height.
 - Updated the HUD, in-game controls, and app commands so the player can switch presentation modes during a live operation without leaving the mission flow.
 
+### First-Person Presentation Readability Pass Added
+
+- Added a lightweight first-person occlusion field so buildings, convoy wrecks, doors, low walls, towers, ridges, and foliage can suppress targets and pickups behind cover instead of letting every cue stack through the scene.
+- Tightened first-person sight readability with optic-ring alignment, iron-sight cues for non-optic weapons, and a closer weapon-to-reticle relationship during movement and recoil.
+- Added active attachment feedback in first-person with visible laser beams and dots, light wash and hotspot overlays, plus focus highlights and HUD assist prompts for nearby interactables and field gear.
+
 ## Cycle 0: Foundation and Playable Slice
 
 - Deliver a bootable macOS app with SwiftUI shell, Metal renderer, and C engine.
@@ -162,7 +168,7 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Deepen the `First-Person Presentation` pass with better occlusion, stronger sight alignment, active attachment feedback, and interaction readability at close range.
+- Continue the `First-Person Presentation` pass with recoil camera motion, stronger muzzle and impact effects, and toggled attachment behavior beyond the current always-on visual feedback.
 - Expand mission scripting into branching triggers, authored objective phases, and richer campaign slots.
 - Continue Cycle 3 material response with more surface classes, ricochet behavior, and active attachment interactions beyond the current passive mounting model.
 - Start the first Cycle 4 command-layer pass with friendly AI teammates or lightweight fireteam orders once the current combat loop feels stable.

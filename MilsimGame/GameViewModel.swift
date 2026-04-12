@@ -64,6 +64,7 @@ struct HUDSnapshot {
     var ammo = ""
     var signature = ""
     var presentation = ""
+    var presentationAssist = ""
     var posture = ""
     var health = ""
     var stamina = ""
@@ -787,6 +788,135 @@ final class GameViewModel: ObservableObject {
         return "View tactical overhead | P first-person"
     }
 
+    private func normalizedAimVector(_ aim: SIMD2<Float>) -> SIMD2<Float> {
+        if simd_length_squared(aim) > 0.0001 {
+            return simd_normalize(aim)
+        }
+        return SIMD2<Float>(0, 1)
+    }
+
+    private func firstPersonFocusHint(for statePointer: UnsafePointer<GameState>,
+                                      playerPosition: SIMD2<Float>,
+                                      aim: SIMD2<Float>) -> String? {
+        let forward = normalizedAimVector(aim)
+        var bestScore = Float.greatestFiniteMagnitude
+        var bestHint: String?
+
+        let interactableCount = Int(game_interactable_count(statePointer))
+        for index in 0..<interactableCount {
+            guard let interactable = game_interactable_at(statePointer, index)?.pointee else {
+                continue
+            }
+
+            let position = SIMD2<Float>(interactable.position.x, interactable.position.y)
+            let offset = position - playerPosition
+            let distance = simd_length(offset)
+            guard distance <= 150, distance > 0.001 else {
+                continue
+            }
+
+            let facing = simd_dot(simd_normalize(offset), forward)
+            if facing < 0.32 {
+                continue
+            }
+
+            let score = distance + max(0, 0.82 - facing) * 70
+            if score >= bestScore {
+                continue
+            }
+
+            let label = string(fromTuple: interactable.name)
+            let range = Int(distance.rounded())
+            switch interactable.kind {
+            case InteractableKind_Door:
+                bestHint = "Focus F: toggle \(label) \(range)m"
+            case InteractableKind_SupplyCrate:
+                bestHint = "Focus F: resupply \(range)m"
+            case InteractableKind_DeadDrop:
+                bestHint = "Focus F: recover \(label) \(range)m"
+            case InteractableKind_Radio:
+                bestHint = "Focus F: copy intel \(range)m"
+            case InteractableKind_EmplacedWeapon:
+                bestHint = "Focus F: fire \(label) \(range)m"
+            default:
+                break
+            }
+            bestScore = score
+        }
+
+        let worldItemCount = Int(game_world_item_count(statePointer))
+        for index in 0..<worldItemCount {
+            guard let item = game_world_item_at(statePointer, index)?.pointee else {
+                continue
+            }
+
+            let position = SIMD2<Float>(item.position.x, item.position.y)
+            let offset = position - playerPosition
+            let distance = simd_length(offset)
+            guard distance <= 130, distance > 0.001 else {
+                continue
+            }
+
+            let facing = simd_dot(simd_normalize(offset), forward)
+            if facing < 0.26 {
+                continue
+            }
+
+            let score = distance + max(0, 0.8 - facing) * 64
+            if score >= bestScore {
+                continue
+            }
+
+            bestScore = score
+            bestHint = "Focus F: recover \(string(fromTuple: item.name)) \(Int(distance.rounded()))m"
+        }
+
+        return bestHint
+    }
+
+    private func presentationAssistLine(for statePointer: UnsafePointer<GameState>,
+                                        playerPosition: SIMD2<Float>,
+                                        aim: SIMD2<Float>,
+                                        selectedIndex: Int) -> String {
+        guard firstPersonPresentation else {
+            return "Overwatch view keeps the route and intel board in frame."
+        }
+
+        var cues: [String] = []
+
+        if selectedIndex >= 0, let selectedItem = game_inventory_item_at(statePointer, selectedIndex) {
+            let item = selectedItem.pointee
+            if item.kind == ItemKind_Gun {
+                cues.append(item.opticMounted ? "optic aligned" : "front sight aligned")
+                if item.laserMounted {
+                    cues.append("laser active")
+                }
+                if item.lightMounted {
+                    cues.append("light wash")
+                }
+                if item.underbarrelMounted {
+                    cues.append("grip settled")
+                }
+            } else if item.weaponClass == WeaponClass_Knife {
+                cues.append("blade centered")
+            } else if item.kind == ItemKind_Medkit {
+                cues.append("medical kit in hand")
+            } else {
+                cues.append("support gear readied")
+            }
+        } else {
+            cues.append("hands free")
+        }
+
+        if let focusHint = firstPersonFocusHint(for: statePointer, playerPosition: playerPosition, aim: aim) {
+            cues.append(focusHint)
+        } else {
+            cues.append("scan doors, crates, and field gear with F")
+        }
+
+        return cues.joined(separator: " | ")
+    }
+
     private func woundSummary(for flags: UInt32) -> String {
         var wounds: [String] = []
 
@@ -921,6 +1051,7 @@ final class GameViewModel: ObservableObject {
             let radioIntelUnlocked = game_radio_intel_unlocked(statePointer)
             let player = statePointer.pointee.player
             let playerPosition = SIMD2<Float>(player.position.x, player.position.y)
+            let aimVector = SIMD2<Float>(player.aim.x, player.aim.y)
             let worldHalfSize = SIMD2<Float>(game_world_half_width(), game_world_half_height())
 
             var ammoLine = "Close assault weapon ready"
@@ -1026,6 +1157,12 @@ final class GameViewModel: ObservableObject {
             let campaignStatus = campaignStatusLine()
             let saveStatus = saveStatusLine()
             let presentationLine = presentationStatusLine()
+            let presentationAssist = presentationAssistLine(
+                for: statePointer,
+                playerPosition: playerPosition,
+                aim: aimVector,
+                selectedIndex: selectedIndex
+            )
             let healthLine = "Health \(Int(game_player_health(statePointer))) | Pain \(Int(player.pain.rounded())) | Shock \(Int(player.staminaShock.rounded()))"
             let staminaLine = "Stamina \(Int(game_player_stamina(statePointer))) | Supp \(Int(player.suppression.rounded()))%"
             let woundLine = "Wounds \(woundSummary(for: UInt32(player.woundFlags))) | Fractures \(fractureSummary(for: UInt32(player.fractureFlags)))"
@@ -1049,6 +1186,7 @@ final class GameViewModel: ObservableObject {
                 ammo: ammoLine,
                 signature: signatureLine,
                 presentation: presentationLine,
+                presentationAssist: presentationAssist,
                 posture: "\(stance)\(leanText)",
                 health: healthLine,
                 stamina: staminaLine,
