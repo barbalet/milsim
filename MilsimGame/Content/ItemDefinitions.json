@@ -18,6 +18,9 @@
       "supportedFireModes": ["semi", "auto"],
       "supportsSuppressor": true,
       "supportsOptic": true,
+      "supportsLaser": true,
+      "supportsLight": true,
+      "supportsUnderbarrel": true,
       "opticMounted": true
     },
     {
@@ -37,6 +40,7 @@
       "fireMode": "semi",
       "supportedFireModes": ["semi"],
       "supportsSuppressor": true,
+      "supportsLight": true,
       "supportsOptic": false,
       "opticMounted": false
     },
@@ -92,6 +96,27 @@
       "suppressed": true
     },
     {
+      "id": "peq15_laser",
+      "name": "PEQ-15 Laser",
+      "kind": "attachment",
+      "ammoType": "none",
+      "quantity": 1
+    },
+    {
+      "id": "weapon_light",
+      "name": "Weapon Light",
+      "kind": "attachment",
+      "ammoType": "none",
+      "quantity": 1
+    },
+    {
+      "id": "vertical_grip",
+      "name": "Vertical Grip",
+      "kind": "attachment",
+      "ammoType": "none",
+      "quantity": 1
+    },
+    {
       "id": "combat_gauze",
       "name": "Combat Gauze",
       "kind": "medkit",
@@ -123,6 +148,7 @@
       "supportedFireModes": ["semi"],
       "supportsSuppressor": true,
       "supportsOptic": true,
+      "supportsUnderbarrel": true,
       "opticMounted": true
     },
     {
@@ -143,6 +169,9 @@
       "supportedFireModes": ["semi", "burst", "auto"],
       "supportsSuppressor": true,
       "supportsOptic": true,
+      "supportsLaser": true,
+      "supportsLight": true,
+      "supportsUnderbarrel": true,
       "opticMounted": false
     },
     {
@@ -163,6 +192,7 @@
       "supportedFireModes": ["semi"],
       "supportsSuppressor": true,
       "supportsOptic": true,
+      "supportsUnderbarrel": true,
       "opticMounted": true
     },
     {

@@ -63,6 +63,15 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Expanded damage modeling with head wounds, limb fractures, stamina shock, and combat splints so recovery now has separate bleeding and fracture treatment decisions.
 - Added wounded-enemy fallback behavior plus pain and bleed penalties so hostile reactions feel less binary than patrol-or-fire.
 - Added limited thin-cover penetration through doors and select low walls to start the Cycle 3 penetration-class work.
+- Expanded attachment support beyond optics and suppressors with passive laser, weapon-light, and vertical-grip mounting on compatible firearms.
+- Broadened surface interaction so projectiles can now degrade through select convoy cover and get softened by concealment foliage before reaching the target.
+- Strengthened ballistic signature feedback with weapon report tiers, faster near-miss suppression, and HUD summaries for report, penetration, and mounted attachment state.
+
+### First-Person Presentation First Pass Added
+
+- Added a toggleable first-person presentation layer over the existing C simulation while retaining the tactical overhead view as an alternate camera.
+- Projected structures, interactables, items, enemies, tracers, and a held-weapon silhouette into a forward-facing Metal scene with a basic horizon, reticle, and stance-aware camera height.
+- Updated the HUD, in-game controls, and app commands so the player can switch presentation modes during a live operation without leaving the mission flow.
 
 ## Cycle 0: Foundation and Playable Slice
 
@@ -102,6 +111,14 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Add radio reports and lightweight command UI in SwiftUI.
 - Introduce mission scoring based on stealth, tempo, casualties, and recovered matériel.
 - Exit criteria: small-unit leadership becomes a core part of moment-to-moment play.
+
+## First-Person Presentation
+
+- Build a player-centered first-person render path over the existing tactical simulation instead of replacing the C gameplay model.
+- Project terrain context, structures, interactables, hostiles, pickups, tracers, and the held weapon into a readable forward-facing scene.
+- Preserve the tactical overhead view and map tools as fast-switch command aids while the first-person layer matures.
+- Tune occlusion, cover readability, sight alignment, muzzle effects, and interaction prompts for close and mid-range fights.
+- Exit criteria: every mission remains playable in first-person with clear orientation, stable combat readability, and quick access to tactical context.
 
 ## Cycle 5: Vehicles and Logistics
 
@@ -145,6 +162,7 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Expand Cycle 3 from thin-cover penetration into broader surface classes, stronger ballistic/audio signatures, and attachment expansion beyond optics and suppressors.
+- Deepen the `First-Person Presentation` pass with better occlusion, stronger sight alignment, active attachment feedback, and interaction readability at close range.
 - Expand mission scripting into branching triggers, authored objective phases, and richer campaign slots.
+- Continue Cycle 3 material response with more surface classes, ricochet behavior, and active attachment interactions beyond the current passive mounting model.
 - Start the first Cycle 4 command-layer pass with friendly AI teammates or lightweight fireteam orders once the current combat loop feels stable.

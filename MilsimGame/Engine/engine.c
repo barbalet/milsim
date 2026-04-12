@@ -40,7 +40,13 @@ typedef struct ContentItemTemplate {
     unsigned int supportedFireModes;
     bool supportsSuppressor;
     bool supportsOptic;
+    bool supportsLaser;
+    bool supportsLight;
+    bool supportsUnderbarrel;
     bool opticMounted;
+    bool laserMounted;
+    bool lightMounted;
+    bool underbarrelMounted;
 } ContentItemTemplate;
 
 typedef struct MissionLoadoutEntry {
@@ -100,6 +106,8 @@ static void apply_player_suppression(GameState *state, float amount, bool announ
 static void apply_player_hit(GameState *state, float damage, Vec2 impactVelocity);
 static void apply_enemy_hit(GameState *state, Enemy *enemy, float damage, Vec2 impactVelocity, bool announce);
 static void treat_wounds(GameState *state);
+static bool selected_weapon_has_light(const GameState *state);
+static bool selected_weapon_has_laser(const GameState *state);
 
 static float clampf(float value, float minimum, float maximum) {
     if (value < minimum) {
@@ -306,7 +314,13 @@ bool game_content_add_item_template(const char *identifier,
                                     unsigned int supportedFireModes,
                                     bool supportsSuppressor,
                                     bool supportsOptic,
-                                    bool opticMounted) {
+                                    bool supportsLaser,
+                                    bool supportsLight,
+                                    bool supportsUnderbarrel,
+                                    bool opticMounted,
+                                    bool laserMounted,
+                                    bool lightMounted,
+                                    bool underbarrelMounted) {
     ContentItemTemplate *itemTemplate;
 
     if (identifier == NULL || name == NULL || sContentItemTemplateCount >= kMaxContentItemTemplates) {
@@ -333,7 +347,13 @@ bool game_content_add_item_template(const char *identifier,
     itemTemplate->supportedFireModes = supportedFireModes;
     itemTemplate->supportsSuppressor = supportsSuppressor;
     itemTemplate->supportsOptic = supportsOptic;
+    itemTemplate->supportsLaser = supportsLaser;
+    itemTemplate->supportsLight = supportsLight;
+    itemTemplate->supportsUnderbarrel = supportsUnderbarrel;
     itemTemplate->opticMounted = opticMounted;
+    itemTemplate->laserMounted = laserMounted;
+    itemTemplate->lightMounted = lightMounted;
+    itemTemplate->underbarrelMounted = underbarrelMounted;
     sContentItemTemplateCount += 1;
     return true;
 }
@@ -425,7 +445,13 @@ static InventoryItem make_weapon(const char *name,
                                  unsigned int supportedFireModes,
                                  bool supportsSuppressor,
                                  bool supportsOptic,
-                                 bool opticMounted) {
+                                 bool supportsLaser,
+                                 bool supportsLight,
+                                 bool supportsUnderbarrel,
+                                 bool opticMounted,
+                                 bool laserMounted,
+                                 bool lightMounted,
+                                 bool underbarrelMounted) {
     InventoryItem item;
     memset(&item, 0, sizeof(item));
     item.active = true;
@@ -450,7 +476,13 @@ static InventoryItem make_weapon(const char *name,
     item.supportedFireModes = supportedFireModes;
     item.supportsSuppressor = supportsSuppressor;
     item.supportsOptic = supportsOptic;
+    item.supportsLaser = supportsLaser;
+    item.supportsLight = supportsLight;
+    item.supportsUnderbarrel = supportsUnderbarrel;
     item.opticMounted = opticMounted;
+    item.laserMounted = laserMounted;
+    item.lightMounted = lightMounted;
+    item.underbarrelMounted = underbarrelMounted;
     return item;
 }
 
@@ -481,7 +513,13 @@ static WorldItem make_world_weapon(const char *name,
                                    unsigned int supportedFireModes,
                                    bool supportsSuppressor,
                                    bool supportsOptic,
-                                   bool opticMounted) {
+                                   bool supportsLaser,
+                                   bool supportsLight,
+                                   bool supportsUnderbarrel,
+                                   bool opticMounted,
+                                   bool laserMounted,
+                                   bool lightMounted,
+                                   bool underbarrelMounted) {
     WorldItem item;
     memset(&item, 0, sizeof(item));
     item.active = true;
@@ -506,7 +544,13 @@ static WorldItem make_world_weapon(const char *name,
     item.supportedFireModes = supportedFireModes;
     item.supportsSuppressor = supportsSuppressor;
     item.supportsOptic = supportsOptic;
+    item.supportsLaser = supportsLaser;
+    item.supportsLight = supportsLight;
+    item.supportsUnderbarrel = supportsUnderbarrel;
     item.opticMounted = opticMounted;
+    item.laserMounted = laserMounted;
+    item.lightMounted = lightMounted;
+    item.underbarrelMounted = underbarrelMounted;
     return item;
 }
 
@@ -568,7 +612,13 @@ static InventoryItem inventory_item_from_template(const ContentItemTemplate *ite
                            itemTemplate->supportedFireModes,
                            itemTemplate->supportsSuppressor,
                            itemTemplate->supportsOptic,
-                           itemTemplate->opticMounted);
+                           itemTemplate->supportsLaser,
+                           itemTemplate->supportsLight,
+                           itemTemplate->supportsUnderbarrel,
+                           itemTemplate->opticMounted,
+                           itemTemplate->laserMounted,
+                           itemTemplate->lightMounted,
+                           itemTemplate->underbarrelMounted);
     }
 
     return make_support_item(itemTemplate->name,
@@ -594,7 +644,13 @@ static WorldItem world_item_from_template(const ContentItemTemplate *itemTemplat
                                  itemTemplate->supportedFireModes,
                                  itemTemplate->supportsSuppressor,
                                  itemTemplate->supportsOptic,
-                                 itemTemplate->opticMounted);
+                                 itemTemplate->supportsLaser,
+                                 itemTemplate->supportsLight,
+                                 itemTemplate->supportsUnderbarrel,
+                                 itemTemplate->opticMounted,
+                                 itemTemplate->laserMounted,
+                                 itemTemplate->lightMounted,
+                                 itemTemplate->underbarrelMounted);
     }
 
     if (itemTemplate->kind == ItemKind_Objective) {
@@ -979,8 +1035,13 @@ static void update_command_route(GameState *state) {
 
 static void update_discovery(GameState *state) {
     size_t index;
-    const float worldItemDiscoveryRadius = 220.0f;
-    const float interactableDiscoveryRadius = 240.0f;
+    float worldItemDiscoveryRadius = 220.0f;
+    float interactableDiscoveryRadius = 240.0f;
+
+    if (selected_weapon_has_light(state)) {
+        worldItemDiscoveryRadius += 110.0f;
+        interactableDiscoveryRadius += 120.0f;
+    }
 
     for (index = 0; index < GAME_MAX_ITEMS; index += 1) {
         WorldItem *item = &state->worldItems[index];
@@ -1812,11 +1873,22 @@ static const Structure *blocking_structure_at_position(const GameState *state, V
     return NULL;
 }
 
+static const Structure *concealing_structure_at_position(const GameState *state, Vec2 position) {
+    size_t index;
+    for (index = 0; index < GAME_MAX_STRUCTURES; index += 1) {
+        const Structure *structure = &state->structures[index];
+        if (structure->active && structure->conceals && position_inside_structure(structure, position, 1.0f)) {
+            return structure;
+        }
+    }
+    return NULL;
+}
+
 static bool try_penetrate_cover(Projectile *projectile, const Structure *structure) {
-    float speed;
     float velocityLoss = 1.0f;
     float damageLoss = 1.0f;
-    float minimumSpeed = 0.0f;
+    float minimumPower = 0.0f;
+    float powerLoss = 0.0f;
     float advanceDistance;
     Vec2 direction;
 
@@ -1824,17 +1896,24 @@ static bool try_penetrate_cover(Projectile *projectile, const Structure *structu
         return false;
     }
 
-    speed = vec2_length(projectile->velocity);
     switch (structure->kind) {
         case StructureKind_Door:
-            minimumSpeed = 520.0f;
-            velocityLoss = 0.70f;
-            damageLoss = 0.78f;
+            minimumPower = 520.0f;
+            velocityLoss = 0.74f;
+            damageLoss = 0.82f;
+            powerLoss = 210.0f;
             break;
         case StructureKind_LowWall:
-            minimumSpeed = 860.0f;
-            velocityLoss = 0.54f;
-            damageLoss = 0.56f;
+            minimumPower = 780.0f;
+            velocityLoss = 0.60f;
+            damageLoss = 0.60f;
+            powerLoss = 390.0f;
+            break;
+        case StructureKind_Convoy:
+            minimumPower = 980.0f;
+            velocityLoss = 0.48f;
+            damageLoss = 0.52f;
+            powerLoss = 520.0f;
             break;
         case StructureKind_None:
         case StructureKind_Ridge:
@@ -1842,21 +1921,21 @@ static bool try_penetrate_cover(Projectile *projectile, const Structure *structu
         case StructureKind_TreeCluster:
         case StructureKind_Building:
         case StructureKind_Tower:
-        case StructureKind_Convoy:
         default:
             return false;
     }
 
-    if (speed < minimumSpeed) {
+    if (projectile->penetrationPower < minimumPower) {
         return false;
     }
 
     projectile->penetrationsRemaining -= 1;
     projectile->velocity = vec2_scale(projectile->velocity, velocityLoss);
     projectile->damage *= damageLoss;
+    projectile->penetrationPower = clampf(projectile->penetrationPower - powerLoss, 0.0f, 1800.0f);
     projectile->ttl = clampf(projectile->ttl - 0.08f, 0.05f, 10.0f);
     direction = vec2_normalize(projectile->velocity);
-    advanceDistance = fmaxf(structure->size.x, structure->size.y) * 0.55f + 10.0f;
+    advanceDistance = fmaxf(structure->size.x, structure->size.y) * 0.7f + 14.0f;
     projectile->position = vec2_add(projectile->position, vec2_scale(direction, advanceDistance));
     projectile->nearMissApplied = false;
 
@@ -1935,7 +2014,13 @@ static void attempt_move_enemy(const GameState *state, Enemy *enemy, Vec2 desire
     }
 }
 
-static void spawn_projectile(GameState *state, Vec2 position, Vec2 direction, float speed, float damage, bool fromPlayer) {
+static void spawn_projectile(GameState *state,
+                             Vec2 position,
+                             Vec2 direction,
+                             float speed,
+                             float damage,
+                             float penetrationPower,
+                             bool fromPlayer) {
     size_t index;
     for (index = 0; index < GAME_MAX_PROJECTILES; index += 1) {
         if (!state->projectiles[index].active) {
@@ -1948,6 +2033,8 @@ static void spawn_projectile(GameState *state, Vec2 position, Vec2 direction, fl
             state->projectiles[index].fromPlayer = fromPlayer;
             state->projectiles[index].nearMissApplied = false;
             state->projectiles[index].penetrationsRemaining = (speed >= 900.0f) ? 2 : (speed >= 640.0f ? 1 : 0);
+            state->projectiles[index].penetrationPower = penetrationPower;
+            state->projectiles[index].softenedByVegetation = false;
             return;
         }
     }
@@ -1957,7 +2044,55 @@ static void reset_weapon_logic(GameState *state) {
     state->player.burstShotsRemaining = 0;
 }
 
-static bool try_apply_suppressor(GameState *state) {
+static bool text_contains_fragment(const char *text, const char *fragment) {
+    return text != NULL && fragment != NULL && strstr(text, fragment) != NULL;
+}
+
+static bool mount_attachment_on_weapon(InventoryItem *item, const char *attachmentName, const char **mountedLabel) {
+    if (item == NULL || item->kind != ItemKind_Gun || attachmentName == NULL) {
+        return false;
+    }
+
+    if (text_contains_fragment(attachmentName, "Suppressor")) {
+        if (item->supportsSuppressor && !item->suppressed) {
+            item->suppressed = true;
+            *mountedLabel = "suppressor";
+            return true;
+        }
+        return false;
+    }
+
+    if (text_contains_fragment(attachmentName, "Laser")) {
+        if (item->supportsLaser && !item->laserMounted) {
+            item->laserMounted = true;
+            *mountedLabel = "laser";
+            return true;
+        }
+        return false;
+    }
+
+    if (text_contains_fragment(attachmentName, "Light")) {
+        if (item->supportsLight && !item->lightMounted) {
+            item->lightMounted = true;
+            *mountedLabel = "light";
+            return true;
+        }
+        return false;
+    }
+
+    if (text_contains_fragment(attachmentName, "Grip")) {
+        if (item->supportsUnderbarrel && !item->underbarrelMounted) {
+            item->underbarrelMounted = true;
+            *mountedLabel = "under-barrel grip";
+            return true;
+        }
+        return false;
+    }
+
+    return false;
+}
+
+static bool try_apply_attachment_named(GameState *state, const char *attachmentName, char *buffer, size_t bufferSize) {
     int preferred[] = {
         state->player.selectedIndex,
         state->player.primaryIndex,
@@ -1969,13 +2104,81 @@ static bool try_apply_suppressor(GameState *state) {
         int index = preferred[slot];
         if (index >= 0 && index < state->player.inventoryCount) {
             InventoryItem *item = &state->player.inventory[index];
-            if (item->kind == ItemKind_Gun && item->supportsSuppressor && !item->suppressed) {
-                item->suppressed = true;
+            const char *mountedLabel = NULL;
+
+            if (mount_attachment_on_weapon(item, attachmentName, &mountedLabel)) {
+                snprintf(buffer, bufferSize, "Mounted %s on %s.", mountedLabel, item->name);
                 return true;
             }
         }
     }
     return false;
+}
+
+static float weapon_report_duration(const InventoryItem *item) {
+    float duration = 0.85f;
+
+    if (item == NULL || item->kind != ItemKind_Gun) {
+        return 0.35f;
+    }
+
+    switch (item->weaponClass) {
+        case WeaponClass_Pistol:
+            duration = 0.95f;
+            break;
+        case WeaponClass_Carbine:
+            duration = 1.45f;
+            break;
+        case WeaponClass_Rifle:
+            duration = 1.72f;
+            break;
+        case WeaponClass_None:
+        case WeaponClass_Knife:
+        default:
+            duration = 0.8f;
+            break;
+    }
+
+    duration += clampf((item->muzzleVelocity - 640.0f) / 520.0f, 0.0f, 0.58f);
+    if (item->fireMode == FireMode_Auto) {
+        duration += 0.18f;
+    } else if (item->fireMode == FireMode_Burst) {
+        duration += 0.1f;
+    }
+    if (item->suppressed) {
+        duration *= 0.48f;
+    }
+
+    return clampf(duration, 0.35f, 2.45f);
+}
+
+static float weapon_penetration_power(const InventoryItem *item) {
+    float power;
+
+    if (item == NULL || item->kind != ItemKind_Gun) {
+        return 220.0f;
+    }
+
+    power = item->muzzleVelocity * 0.92f;
+    power += item->damage * 5.5f;
+    if (item->weaponClass == WeaponClass_Pistol) {
+        power *= 0.72f;
+    }
+    if (item->suppressed) {
+        power *= 0.96f;
+    }
+
+    return clampf(power, 240.0f, 1520.0f);
+}
+
+static bool selected_weapon_has_light(const GameState *state) {
+    const InventoryItem *item = selected_item_const(state);
+    return item != NULL && item->kind == ItemKind_Gun && item->lightMounted;
+}
+
+static bool selected_weapon_has_laser(const GameState *state) {
+    const InventoryItem *item = selected_item_const(state);
+    return item != NULL && item->kind == ItemKind_Gun && item->laserMounted;
 }
 
 static void collect_world_item(GameState *state, size_t index) {
@@ -2006,13 +2209,15 @@ static void collect_world_item(GameState *state, size_t index) {
             break;
         }
         case ItemKind_Attachment: {
-            if (try_apply_suppressor(state)) {
-                set_event(state, "Mounted suppressor on current loadout.");
+            if (try_apply_attachment_named(state, worldItem->name, buffer, sizeof(buffer))) {
+                set_event(state, buffer);
             } else {
                 if (add_or_stack_support_item(player, worldItem->name, ItemKind_Attachment, AmmoType_None, 1, 0) >= 0) {
-                    set_event(state, "Stored suppressor for later.");
+                    snprintf(buffer, sizeof(buffer), "Stored %s for later.", worldItem->name);
+                    set_event(state, buffer);
                 } else {
-                    set_event(state, "Pack is full. Could not store suppressor.");
+                    snprintf(buffer, sizeof(buffer), "Pack is full. Could not store %s.", worldItem->name);
+                    set_event(state, buffer);
                     return;
                 }
             }
@@ -2051,7 +2256,13 @@ static void collect_world_item(GameState *state, size_t index) {
                                              worldItem->supportedFireModes,
                                              worldItem->supportsSuppressor,
                                              worldItem->supportsOptic,
-                                             worldItem->opticMounted);
+                                             worldItem->supportsLaser,
+                                             worldItem->supportsLight,
+                                             worldItem->supportsUnderbarrel,
+                                             worldItem->opticMounted,
+                                             worldItem->laserMounted,
+                                             worldItem->lightMounted,
+                                             worldItem->underbarrelMounted);
             int addedIndex = add_inventory_item(player, item);
             if (addedIndex >= 0) {
                 if ((worldItem->weaponClass == WeaponClass_Rifle || worldItem->weaponClass == WeaponClass_Carbine) &&
@@ -2202,9 +2413,9 @@ static void interact_with_emplaced_weapon(GameState *state, Interactable *intera
     }
 
     direction = vec2_normalize(vec2_sub(enemy->position, interactable->position));
-    spawn_projectile(state, interactable->position, vec2_rotate(direction, -0.025f), 1180.0f, 28.0f, true);
-    spawn_projectile(state, interactable->position, direction, 1220.0f, 30.0f, true);
-    spawn_projectile(state, interactable->position, vec2_rotate(direction, 0.025f), 1180.0f, 28.0f, true);
+    spawn_projectile(state, interactable->position, vec2_rotate(direction, -0.025f), 1180.0f, 28.0f, 1260.0f, true);
+    spawn_projectile(state, interactable->position, direction, 1220.0f, 30.0f, 1320.0f, true);
+    spawn_projectile(state, interactable->position, vec2_rotate(direction, 0.025f), 1180.0f, 28.0f, 1260.0f, true);
     interactable->cooldown = 4.0f;
     state->player.noiseTimer = 1.9f;
     set_event(state, "Emplaced weapon stitched rounds across the patrol.");
@@ -2424,6 +2635,9 @@ static void fire_selected_weapon(GameState *state) {
         float stanceMultiplier = 1.0f;
         float leanPenalty = fabsf(state->player.lean) * 0.3f;
         float opticBonus = item->opticMounted ? 0.75f : 1.0f;
+        float laserBonus = item->laserMounted ? 0.88f : 1.0f;
+        float lightBonus = item->lightMounted ? 0.94f : 1.0f;
+        float underbarrelBonus = item->underbarrelMounted ? 0.82f : 1.0f;
         float burstPenalty = (item->fireMode == FireMode_Auto) ? 1.25f : (item->fireMode == FireMode_Burst ? 1.1f : 1.0f);
         float painPenalty = 1.0f + (state->player.pain * 0.008f);
         float suppressionPenalty = 1.0f + (state->player.suppression * 0.01f);
@@ -2439,7 +2653,7 @@ static void fire_selected_weapon(GameState *state) {
             stanceMultiplier = 0.48f;
         }
 
-        recoilAngle = item->recoil * stanceMultiplier * opticBonus * burstPenalty;
+        recoilAngle = item->recoil * stanceMultiplier * opticBonus * laserBonus * lightBonus * underbarrelBonus * burstPenalty;
         recoilAngle *= (1.0f + leanPenalty);
         recoilAngle *= painPenalty * suppressionPenalty * armPenalty * fracturePenalty * headPenalty * shockPenalty;
         recoilAngle *= sinf((state->missionTime * 17.0f) + (float) state->collectedItemCount * 0.4f);
@@ -2468,8 +2682,9 @@ static void fire_selected_weapon(GameState *state) {
                      direction,
                      item->muzzleVelocity,
                      item->damage,
+                     weapon_penetration_power(item),
                      true);
-    state->player.noiseTimer = item->suppressed ? 0.55f : 1.6f;
+    state->player.noiseTimer = weapon_report_duration(item);
     state->player.suppression = clampf(state->player.suppression - 4.0f, 0.0f, 100.0f);
 }
 
@@ -2641,6 +2856,16 @@ static void update_projectiles(GameState *state, float dt) {
             }
         }
 
+        if (!projectile->softenedByVegetation) {
+            const Structure *concealment = concealing_structure_at_position(state, projectile->position);
+            if (concealment != NULL) {
+                projectile->velocity = vec2_scale(projectile->velocity, 0.86f);
+                projectile->damage *= 0.9f;
+                projectile->penetrationPower *= 0.88f;
+                projectile->softenedByVegetation = true;
+            }
+        }
+
         if (projectile->fromPlayer) {
             for (enemyIndex = 0; enemyIndex < GAME_MAX_ENEMIES; enemyIndex += 1) {
                 Enemy *enemy = &state->enemies[enemyIndex];
@@ -2654,7 +2879,8 @@ static void update_projectiles(GameState *state, float dt) {
                     projectile->active = false;
                     break;
                 } else if (!projectile->nearMissApplied && vec2_distance(projectile->position, enemy->position) < 86.0f) {
-                    enemy->suppression = clampf(enemy->suppression + 16.0f, 0.0f, 100.0f);
+                    float crackSuppression = projectile->initialSpeed > 940.0f ? 22.0f : 16.0f;
+                    enemy->suppression = clampf(enemy->suppression + crackSuppression, 0.0f, 100.0f);
                     projectile->nearMissApplied = true;
                 }
             }
@@ -2663,7 +2889,9 @@ static void update_projectiles(GameState *state, float dt) {
             apply_player_hit(state, projectile->damage * impactScale, projectile->velocity);
             projectile->active = false;
         } else if (!projectile->nearMissApplied && vec2_distance(projectile->position, state->player.position) < 118.0f) {
-            apply_player_suppression(state, 12.0f, true);
+            float crackSuppression = projectile->initialSpeed > 940.0f ? 18.0f : 12.0f;
+            apply_player_suppression(state, crackSuppression, false);
+            set_event(state, projectile->initialSpeed > 940.0f ? "Supersonic crack overhead." : "Rounds cracking overhead.");
             projectile->nearMissApplied = true;
         }
     }
@@ -2694,7 +2922,12 @@ static void update_enemies(GameState *state, float dt) {
         detectionRange *= 0.72f;
     }
     if (state->player.noiseTimer > 0.0f) {
-        detectionRange *= 1.35f;
+        detectionRange *= 1.0f + clampf(state->player.noiseTimer * 0.24f, 0.06f, 0.75f);
+    }
+    if (selected_weapon_has_light(state)) {
+        detectionRange *= 1.1f;
+    } else if (selected_weapon_has_laser(state)) {
+        detectionRange *= 1.05f;
     }
 
     for (index = 0; index < GAME_MAX_ENEMIES; index += 1) {
@@ -2772,6 +3005,7 @@ static void update_enemies(GameState *state, float dt) {
                                      aim,
                                      640.0f,
                                      8.0f,
+                                     420.0f,
                                      false);
                 }
                 enemy->fireCooldown = 1.18f + enemy->suppression * 0.012f + enemy->pain * 0.008f;
@@ -2825,6 +3059,7 @@ static void update_enemies(GameState *state, float dt) {
                                      aim,
                                      640.0f,
                                      8.0f,
+                                     420.0f,
                                      false);
                 }
                 enemy->fireCooldown = 0.95f +
@@ -2889,27 +3124,30 @@ static void register_default_loadout_for_mission(MissionType missionType) {
 static void register_default_content(void) {
     clear_content_database_internal();
 
-    game_content_add_item_template("mk18_carbine", "MK18 Carbine", ItemKind_Gun, AmmoType_556, WeaponClass_Carbine, 1, 30, 30, 32.0f, 780.0f, false, 0.055f, 960.0f, FireMode_Auto, fire_mode_mask(FireMode_Semi) | fire_mode_mask(FireMode_Auto), true, true, true);
-    game_content_add_item_template("m17_sidearm", "M17 Sidearm", ItemKind_Gun, AmmoType_9mm, WeaponClass_Pistol, 1, 17, 17, 20.0f, 520.0f, false, 0.042f, 700.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), true, false, false);
-    game_content_add_item_template("field_knife", "Field Knife", ItemKind_Blade, AmmoType_None, WeaponClass_Knife, 1, 0, 0, 52.0f, 70.0f, false, 0.0f, 0.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), false, false, false);
-    game_content_add_item_template("ammo_556_ball", "5.56 Ball", ItemKind_BulletBox, AmmoType_556, WeaponClass_None, 30, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("stanag_mag", "STANAG Magazine", ItemKind_Magazine, AmmoType_556, WeaponClass_None, 1, 30, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("ammo_9mm_mag", "9mm Magazine", ItemKind_Magazine, AmmoType_9mm, WeaponClass_None, 2, 17, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("threaded_suppressor", "Threaded Suppressor", ItemKind_Attachment, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, true, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("combat_gauze", "Combat Gauze", ItemKind_Medkit, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("combat_splint", "Combat Splint", ItemKind_Medkit, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("recon_rifle", "Recon Rifle", ItemKind_Gun, AmmoType_556, WeaponClass_Rifle, 1, 20, 20, 42.0f, 900.0f, true, 0.034f, 1100.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), true, true, true);
-    game_content_add_item_template("vx9_carbine", "VX-9 Carbine", ItemKind_Gun, AmmoType_556, WeaponClass_Carbine, 1, 24, 24, 30.0f, 760.0f, false, 0.060f, 900.0f, FireMode_Burst, fire_mode_mask(FireMode_Semi) | fire_mode_mask(FireMode_Burst) | fire_mode_mask(FireMode_Auto), true, true, false);
-    game_content_add_item_template("suppressed_scout_rifle", "Suppressed Scout Rifle", ItemKind_Gun, AmmoType_556, WeaponClass_Rifle, 1, 20, 20, 44.0f, 920.0f, true, 0.030f, 1120.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), true, true, true);
-    game_content_add_item_template("breaching_knife", "Breaching Knife", ItemKind_Blade, AmmoType_None, WeaponClass_Knife, 1, 0, 0, 68.0f, 80.0f, false, 0.0f, 0.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), false, false, false);
+    game_content_add_item_template("mk18_carbine", "MK18 Carbine", ItemKind_Gun, AmmoType_556, WeaponClass_Carbine, 1, 30, 30, 32.0f, 780.0f, false, 0.055f, 960.0f, FireMode_Auto, fire_mode_mask(FireMode_Semi) | fire_mode_mask(FireMode_Auto), true, true, true, true, true, true, false, false, false);
+    game_content_add_item_template("m17_sidearm", "M17 Sidearm", ItemKind_Gun, AmmoType_9mm, WeaponClass_Pistol, 1, 17, 17, 20.0f, 520.0f, false, 0.042f, 700.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), true, false, false, true, false, false, false, false, false);
+    game_content_add_item_template("field_knife", "Field Knife", ItemKind_Blade, AmmoType_None, WeaponClass_Knife, 1, 0, 0, 52.0f, 70.0f, false, 0.0f, 0.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("ammo_556_ball", "5.56 Ball", ItemKind_BulletBox, AmmoType_556, WeaponClass_None, 30, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("stanag_mag", "STANAG Magazine", ItemKind_Magazine, AmmoType_556, WeaponClass_None, 1, 30, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("ammo_9mm_mag", "9mm Magazine", ItemKind_Magazine, AmmoType_9mm, WeaponClass_None, 2, 17, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("threaded_suppressor", "Threaded Suppressor", ItemKind_Attachment, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, true, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("peq15_laser", "PEQ-15 Laser", ItemKind_Attachment, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("weapon_light", "Weapon Light", ItemKind_Attachment, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("vertical_grip", "Vertical Grip", ItemKind_Attachment, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("combat_gauze", "Combat Gauze", ItemKind_Medkit, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("combat_splint", "Combat Splint", ItemKind_Medkit, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("recon_rifle", "Recon Rifle", ItemKind_Gun, AmmoType_556, WeaponClass_Rifle, 1, 20, 20, 42.0f, 900.0f, true, 0.034f, 1100.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), true, true, false, false, true, true, false, false, false);
+    game_content_add_item_template("vx9_carbine", "VX-9 Carbine", ItemKind_Gun, AmmoType_556, WeaponClass_Carbine, 1, 24, 24, 30.0f, 760.0f, false, 0.060f, 900.0f, FireMode_Burst, fire_mode_mask(FireMode_Semi) | fire_mode_mask(FireMode_Burst) | fire_mode_mask(FireMode_Auto), true, true, true, true, true, false, false, false, false);
+    game_content_add_item_template("suppressed_scout_rifle", "Suppressed Scout Rifle", ItemKind_Gun, AmmoType_556, WeaponClass_Rifle, 1, 20, 20, 44.0f, 920.0f, true, 0.030f, 1120.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), true, true, false, false, true, true, false, false, false);
+    game_content_add_item_template("breaching_knife", "Breaching Knife", ItemKind_Blade, AmmoType_None, WeaponClass_Knife, 1, 0, 0, 68.0f, 80.0f, false, 0.0f, 0.0f, FireMode_Semi, fire_mode_mask(FireMode_Semi), false, false, false, false, false, false, false, false, false);
 
-    game_content_add_item_template("cache_ledger", "Cache Ledger", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("firing_codes", "Firing Codes", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("hostage_beacon", "Hostage Beacon", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("observation_reel", "Observation Reel", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("radio_snapshot", "Radio Snapshot", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("convoy_manifest", "Convoy Manifest", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
-    game_content_add_item_template("crypto_tablet", "Crypto Tablet", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false);
+    game_content_add_item_template("cache_ledger", "Cache Ledger", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("firing_codes", "Firing Codes", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("hostage_beacon", "Hostage Beacon", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("observation_reel", "Observation Reel", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("radio_snapshot", "Radio Snapshot", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("convoy_manifest", "Convoy Manifest", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
+    game_content_add_item_template("crypto_tablet", "Crypto Tablet", ItemKind_Objective, AmmoType_None, WeaponClass_None, 1, 0, 0, 0.0f, 0.0f, false, 0.0f, 0.0f, FireMode_Semi, 0, false, false, false, false, false, false, false, false, false);
 
     register_default_loadout_for_mission(MissionType_CacheRaid);
     register_default_loadout_for_mission(MissionType_HostageRecovery);
@@ -2921,6 +3159,7 @@ static void register_default_content(void) {
     game_content_add_mission_loot_entry(MissionType_CacheRaid, "ammo_556_ball", -860.0f, -440.0f);
     game_content_add_mission_loot_entry(MissionType_CacheRaid, "stanag_mag", -440.0f, -250.0f);
     game_content_add_mission_loot_entry(MissionType_CacheRaid, "threaded_suppressor", 210.0f, 20.0f);
+    game_content_add_mission_loot_entry(MissionType_CacheRaid, "peq15_laser", 120.0f, -60.0f);
     game_content_add_mission_loot_entry(MissionType_CacheRaid, "recon_rifle", 760.0f, 380.0f);
     game_content_add_mission_loot_entry(MissionType_CacheRaid, "combat_gauze", 960.0f, 420.0f);
     game_content_add_mission_loot_entry(MissionType_CacheRaid, "combat_splint", -260.0f, -120.0f);
@@ -2929,6 +3168,7 @@ static void register_default_content(void) {
     game_content_add_mission_loot_entry(MissionType_HostageRecovery, "ammo_9mm_mag", -420.0f, 180.0f);
     game_content_add_mission_loot_entry(MissionType_HostageRecovery, "ammo_556_ball", 80.0f, 120.0f);
     game_content_add_mission_loot_entry(MissionType_HostageRecovery, "threaded_suppressor", 720.0f, 20.0f);
+    game_content_add_mission_loot_entry(MissionType_HostageRecovery, "weapon_light", 280.0f, 180.0f);
     game_content_add_mission_loot_entry(MissionType_HostageRecovery, "vx9_carbine", 860.0f, -220.0f);
     game_content_add_mission_loot_entry(MissionType_HostageRecovery, "combat_gauze", 520.0f, 320.0f);
     game_content_add_mission_loot_entry(MissionType_HostageRecovery, "combat_splint", 260.0f, 340.0f);
@@ -2940,6 +3180,7 @@ static void register_default_content(void) {
     game_content_add_mission_loot_entry(MissionType_ReconExfil, "suppressed_scout_rifle", -180.0f, 280.0f);
     game_content_add_mission_loot_entry(MissionType_ReconExfil, "combat_gauze", -760.0f, 540.0f);
     game_content_add_mission_loot_entry(MissionType_ReconExfil, "threaded_suppressor", 420.0f, 220.0f);
+    game_content_add_mission_loot_entry(MissionType_ReconExfil, "vertical_grip", 520.0f, 260.0f);
     game_content_add_mission_loot_entry(MissionType_ReconExfil, "combat_splint", 40.0f, 460.0f);
 
     game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "convoy_manifest", 300.0f, 60.0f);
@@ -2948,6 +3189,8 @@ static void register_default_content(void) {
     game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "stanag_mag", 620.0f, -120.0f);
     game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "ammo_9mm_mag", -300.0f, 220.0f);
     game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "breaching_knife", -720.0f, 220.0f);
+    game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "peq15_laser", 760.0f, -80.0f);
+    game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "weapon_light", -520.0f, 220.0f);
     game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "combat_gauze", -860.0f, -220.0f);
     game_content_add_mission_loot_entry(MissionType_ConvoyAmbush, "combat_splint", 540.0f, -140.0f);
 }

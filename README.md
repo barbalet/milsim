@@ -6,7 +6,7 @@
 - Metal for rendering
 - C for the gameplay and simulation core
 
-The current build is a playable tactical slice with completed Cycle 2 environment systems, persistence foundations, and a deeper Cycle 3 combat pass: run four mission seeds, move through terrain tiles and compounds, use stance and lean to manage exposure, switch fire modes, vault low cover, collect military gear, work gates/crates/radios/emplaced guns, recover objective packages, and extract. Weapons, pickups, mission loot placement, and mission-script text load from bundled JSON, while the tactical map tracks discovered markers, live radio reports, and a command route through the battlefield. The SwiftUI shell can also save and reload a live campaign archive from the HUD or menu bar, and firefights now surface head and limb wounds, fractures, stamina shock, splint treatment, enemy fallback reactions, and thin-cover penetration through selected structures.
+The current build is a playable tactical slice with completed Cycle 2 environment systems, persistence foundations, a broader Cycle 3 combat pass, and the first `First-Person Presentation` cycle: run four mission seeds, move through terrain tiles and compounds, use stance and lean to manage exposure, switch fire modes, vault low cover, collect military gear, work gates/crates/radios/emplaced guns, recover objective packages, and extract. Weapons, pickups, mission loot placement, and mission-script text load from bundled JSON, while the tactical map tracks discovered markers, live radio reports, and a command route through the battlefield. The SwiftUI shell can also save and reload a live campaign archive from the HUD or menu bar, and firefights now surface head and limb wounds, fractures, stamina shock, splint treatment, enemy fallback reactions, broader penetration behavior through select cover, vegetation damping, stronger weapon-signature feedback, and a toggleable first-person view over the same tactical simulation.
 
 ## Controls
 
@@ -26,6 +26,7 @@ The current build is a playable tactical slice with completed Cycle 2 environmen
 - `1`: primary weapon
 - `2`: sidearm
 - `3`: blade weapon
+- `P`: toggle first-person presentation or tactical overhead view
 - `M`: expand or collapse the tactical map
 - `Command` + `S`: save the current campaign archive
 - `Command` + `L`: load the latest campaign archive
@@ -39,10 +40,12 @@ The current build is a playable tactical slice with completed Cycle 2 environmen
 - Layered battlefield structures rendered in Metal: ridges, roads, compounds, low walls, towers, convoy hulks, gates, and concealment foliage
 - Interactable gates, supply crates, dead drops, radios, and emplaced weapons
 - SwiftUI tactical map with grid references, compass heading, discovered markers, command route overlays, radio reports, and radio-gated hostile intel
+- Toggleable first-person presentation pass with projected structures, enemies, items, tracers, reticle, and held-weapon view models over the live C simulation
 - Bundled JSON item definitions and mission loot tables loaded into the C engine at startup
 - Bundled JSON mission scripts for brief, initial-event, and radio-callout overrides
-- C simulation support for stance, lean, vaulting, fire modes, chamber-aware reloads, drag-affected projectiles, thin-cover penetration, suppression, bleeding, pain, head and limb wound zones, fractures, stamina shock, gauze-and-splint treatment, suppressor mounting, enemy fallback reactions, and objective extraction
-- SwiftUI HUD support for mission briefs, posture, chamber status, wound state, suppression, interaction hints, inventory state, operation cycling, and manual campaign save/load
+- C simulation support for stance, lean, vaulting, fire modes, chamber-aware reloads, drag-affected projectiles, selective cover penetration, vegetation damping, suppression, bleeding, pain, head and limb wound zones, fractures, stamina shock, gauze-and-splint treatment, suppressor and passive attachment mounting, enemy fallback reactions, and objective extraction
+- Collectible attachment expansion with PEQ-15 lasers, weapon lights, and vertical grips alongside existing rifles, pistols, blades, magazines, suppressors, and medical gear
+- SwiftUI HUD support for mission briefs, posture, chamber status, wound state, suppression, interaction hints, inventory state, weapon-signature summaries, presentation-mode status, operation cycling, and manual campaign save/load
 
 ## Project Layout
 

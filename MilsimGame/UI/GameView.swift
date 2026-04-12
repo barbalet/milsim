@@ -15,7 +15,8 @@ struct GameView: View {
                 onSaveCampaign: { viewModel.saveCampaign() },
                 onLoadCampaign: { _ = viewModel.loadCampaign() },
                 onToggleFullScreen: { NSApp.keyWindow?.toggleFullScreen(nil) },
-                onToggleMap: { viewModel.toggleMap() }
+                onToggleMap: { viewModel.toggleMap() },
+                onTogglePresentation: { viewModel.togglePresentation() }
             )
             .padding(22)
         }

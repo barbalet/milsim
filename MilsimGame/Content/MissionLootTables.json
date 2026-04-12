@@ -50,6 +50,7 @@
         { "template": "ammo_556_ball", "x": -860, "y": -440 },
         { "template": "stanag_mag", "x": -440, "y": -250 },
         { "template": "threaded_suppressor", "x": 210, "y": 20 },
+        { "template": "peq15_laser", "x": 120, "y": -60 },
         { "template": "recon_rifle", "x": 760, "y": 380 },
         { "template": "combat_gauze", "x": 960, "y": 420 },
         { "template": "combat_splint", "x": -260, "y": -120 }
@@ -62,6 +63,7 @@
         { "template": "ammo_9mm_mag", "x": -420, "y": 180 },
         { "template": "ammo_556_ball", "x": 80, "y": 120 },
         { "template": "threaded_suppressor", "x": 720, "y": 20 },
+        { "template": "weapon_light", "x": 280, "y": 180 },
         { "template": "vx9_carbine", "x": 860, "y": -220 },
         { "template": "combat_gauze", "x": 520, "y": 320 },
         { "template": "combat_splint", "x": 260, "y": 340 }
@@ -77,6 +79,7 @@
         { "template": "suppressed_scout_rifle", "x": -180, "y": 280 },
         { "template": "combat_gauze", "x": -760, "y": 540 },
         { "template": "threaded_suppressor", "x": 420, "y": 220 },
+        { "template": "vertical_grip", "x": 520, "y": 260 },
         { "template": "combat_splint", "x": 40, "y": 460 }
       ]
     },
@@ -89,6 +92,8 @@
         { "template": "stanag_mag", "x": 620, "y": -120 },
         { "template": "ammo_9mm_mag", "x": -300, "y": 220 },
         { "template": "breaching_knife", "x": -720, "y": 220 },
+        { "template": "peq15_laser", "x": 760, "y": -80 },
+        { "template": "weapon_light", "x": -520, "y": 220 },
         { "template": "combat_gauze", "x": -860, "y": -220 },
         { "template": "combat_splint", "x": 540, "y": -140 }
       ]

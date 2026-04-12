@@ -166,7 +166,13 @@ typedef struct InventoryItem {
     unsigned int supportedFireModes;
     bool supportsSuppressor;
     bool supportsOptic;
+    bool supportsLaser;
+    bool supportsLight;
+    bool supportsUnderbarrel;
     bool opticMounted;
+    bool laserMounted;
+    bool lightMounted;
+    bool underbarrelMounted;
 } InventoryItem;
 
 typedef struct WorldItem {
@@ -189,7 +195,13 @@ typedef struct WorldItem {
     unsigned int supportedFireModes;
     bool supportsSuppressor;
     bool supportsOptic;
+    bool supportsLaser;
+    bool supportsLight;
+    bool supportsUnderbarrel;
     bool opticMounted;
+    bool laserMounted;
+    bool lightMounted;
+    bool underbarrelMounted;
 } WorldItem;
 
 typedef struct Projectile {
@@ -202,6 +214,8 @@ typedef struct Projectile {
     bool fromPlayer;
     bool nearMissApplied;
     int penetrationsRemaining;
+    float penetrationPower;
+    bool softenedByVegetation;
 } Projectile;
 
 typedef struct Enemy {
@@ -361,7 +375,13 @@ bool game_content_add_item_template(const char *identifier,
                                     unsigned int supportedFireModes,
                                     bool supportsSuppressor,
                                     bool supportsOptic,
-                                    bool opticMounted);
+                                    bool supportsLaser,
+                                    bool supportsLight,
+                                    bool supportsUnderbarrel,
+                                    bool opticMounted,
+                                    bool laserMounted,
+                                    bool lightMounted,
+                                    bool underbarrelMounted);
 bool game_content_add_mission_loadout_entry(MissionType missionType, const char *templateIdentifier, LoadoutSlotHint slotHint);
 bool game_content_add_mission_loot_entry(MissionType missionType, const char *templateIdentifier, float x, float y);
 bool game_content_set_mission_script(MissionType missionType,

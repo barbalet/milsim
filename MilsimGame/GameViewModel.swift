@@ -62,6 +62,8 @@ struct HUDSnapshot {
     var event = ""
     var weapon = ""
     var ammo = ""
+    var signature = ""
+    var presentation = ""
     var posture = ""
     var health = ""
     var stamina = ""
@@ -108,7 +110,13 @@ private struct ItemDefinitionRecord: Decodable {
     let supportedFireModes: [String]?
     let supportsSuppressor: Bool?
     let supportsOptic: Bool?
+    let supportsLaser: Bool?
+    let supportsLight: Bool?
+    let supportsUnderbarrel: Bool?
     let opticMounted: Bool?
+    let laserMounted: Bool?
+    let lightMounted: Bool?
+    let underbarrelMounted: Bool?
 }
 
 private struct MissionLootTablesDocument: Decodable {
@@ -177,7 +185,7 @@ private struct CampaignSaveEnvelope: Codable {
 }
 
 private enum CampaignStore {
-    static let version = 3
+    static let version = 4
 
     static var saveURL: URL {
         let fileManager = FileManager.default
@@ -283,7 +291,13 @@ private enum GameContentBootstrap {
                         supportedFireModes,
                         item.supportsSuppressor ?? false,
                         item.supportsOptic ?? false,
-                        item.opticMounted ?? false
+                        item.supportsLaser ?? false,
+                        item.supportsLight ?? false,
+                        item.supportsUnderbarrel ?? false,
+                        item.opticMounted ?? false,
+                        item.laserMounted ?? false,
+                        item.lightMounted ?? false,
+                        item.underbarrelMounted ?? false
                     )
                 }
             }
@@ -538,6 +552,7 @@ final class GameViewModel: ObservableObject {
     fileprivate var state = GameState()
     private var hudAccumulator: Float = 0
     private var mapExpanded = true
+    private var firstPersonPresentation = true
     private var campaignProgress = CampaignProgress()
     private var saveStatus = "No campaign save stored."
     private var lastSavedAt: Date?
@@ -598,6 +613,15 @@ final class GameViewModel: ObservableObject {
     func toggleMap() {
         mapExpanded.toggle()
         refreshHUD(force: true)
+    }
+
+    func togglePresentation() {
+        firstPersonPresentation.toggle()
+        refreshHUD(force: true)
+    }
+
+    func isFirstPersonPresentation() -> Bool {
+        firstPersonPresentation
     }
 
     func currentPlayerPosition() -> SIMD2<Float> {
@@ -756,6 +780,13 @@ final class GameViewModel: ObservableObject {
         return saveStatus
     }
 
+    private func presentationStatusLine() -> String {
+        if firstPersonPresentation {
+            return "View FPV active | P tactical overhead"
+        }
+        return "View tactical overhead | P first-person"
+    }
+
     private func woundSummary(for flags: UInt32) -> String {
         var wounds: [String] = []
 
@@ -792,6 +823,86 @@ final class GameViewModel: ObservableObject {
         String(format: "%.1f", value)
     }
 
+    private func attachmentSummary(for item: InventoryItem) -> String {
+        var attachments: [String] = []
+
+        if item.opticMounted {
+            attachments.append("optic")
+        }
+        if item.suppressed {
+            attachments.append("sup")
+        }
+        if item.laserMounted {
+            attachments.append("laser")
+        }
+        if item.lightMounted {
+            attachments.append("light")
+        }
+        if item.underbarrelMounted {
+            attachments.append("grip")
+        }
+
+        return attachments.isEmpty ? "bare" : attachments.joined(separator: ", ")
+    }
+
+    private func reportDescriptor(for item: InventoryItem) -> String {
+        var signature: Float
+
+        switch item.weaponClass {
+        case WeaponClass_Pistol:
+            signature = 0.95
+        case WeaponClass_Carbine:
+            signature = 1.45
+        case WeaponClass_Rifle:
+            signature = 1.72
+        default:
+            signature = 0.8
+        }
+
+        signature += min(max((item.muzzleVelocity - 640) / 520, 0), 0.58)
+        if item.fireMode == FireMode_Auto {
+            signature += 0.18
+        } else if item.fireMode == FireMode_Burst {
+            signature += 0.1
+        }
+        if item.suppressed {
+            signature *= 0.48
+        }
+
+        switch signature {
+        case ..<0.55:
+            return "hushed"
+        case ..<0.95:
+            return "managed"
+        case ..<1.45:
+            return "sharp"
+        default:
+            return "thunder"
+        }
+    }
+
+    private func penetrationDescriptor(for item: InventoryItem) -> String {
+        var power = item.muzzleVelocity * 0.92 + item.damage * 5.5
+
+        if item.weaponClass == WeaponClass_Pistol {
+            power *= 0.72
+        }
+        if item.suppressed {
+            power *= 0.96
+        }
+
+        switch power {
+        case ..<520:
+            return "light cover"
+        case ..<780:
+            return "doors"
+        case ..<980:
+            return "low walls"
+        default:
+            return "vehicle skin"
+        }
+    }
+
     private func refreshHUD(force: Bool) {
         _ = force
 
@@ -813,15 +924,17 @@ final class GameViewModel: ObservableObject {
             let worldHalfSize = SIMD2<Float>(game_world_half_width(), game_world_half_height())
 
             var ammoLine = "Close assault weapon ready"
+            var signatureLine = "Report idle | Pen none | bare"
             if selectedIndex >= 0, let selectedItem = game_inventory_item_at(statePointer, selectedIndex) {
                 if selectedItem.pointee.kind == ItemKind_Gun {
                     let reserve = game_player_total_ammo(statePointer, selectedItem.pointee.ammoType)
-                    let suppressorText = selectedItem.pointee.suppressed ? " | suppressed" : ""
-                    let opticText = selectedItem.pointee.opticMounted ? " | optic" : ""
                     let chamberText = selectedItem.pointee.roundChambered ? 1 : 0
-                    ammoLine = "\(selectedItem.pointee.roundsInMagazine)+\(chamberText) loaded | \(reserve) reserve | \(fireMode)\(suppressorText)\(opticText)"
+                    let attachments = attachmentSummary(for: selectedItem.pointee)
+                    ammoLine = "\(selectedItem.pointee.roundsInMagazine)+\(chamberText) loaded | \(reserve) reserve | \(fireMode) | \(attachments)"
+                    signatureLine = "Report \(reportDescriptor(for: selectedItem.pointee)) | Pen \(penetrationDescriptor(for: selectedItem.pointee))"
                 } else if selectedItem.pointee.weaponClass == WeaponClass_Knife {
                     ammoLine = "Knife readied for close contact"
+                    signatureLine = "Report silent | Pen none | blade"
                 } else if selectedItem.pointee.kind == ItemKind_Medkit {
                     let selectedItemName = string(from: game_inventory_item_name(statePointer, selectedIndex))
                     if selectedItemName.lowercased().contains("splint") {
@@ -829,8 +942,10 @@ final class GameViewModel: ObservableObject {
                     } else {
                         ammoLine = "\(selectedItemName) x\(selectedItem.pointee.quantity) | Press H to treat"
                     }
+                    signatureLine = "Medical gear readied"
                 } else if selectedItem.pointee.quantity > 0 {
                     ammoLine = "\(selectedItem.pointee.quantity)x support item stowed"
+                    signatureLine = "Support item readied"
                 }
             }
 
@@ -862,9 +977,7 @@ final class GameViewModel: ObservableObject {
                     let itemFireMode = (selectedIndex == index) ? fireMode : fireModeName(for: item.pointee.fireMode)
                     let chamberText = item.pointee.roundChambered ? 1 : 0
                     label += "  \(item.pointee.roundsInMagazine)+\(chamberText) | \(reserve) | \(itemFireMode)"
-                    if item.pointee.suppressed {
-                        label += " | sup"
-                    }
+                    label += " | \(attachmentSummary(for: item.pointee))"
                 } else if item.pointee.weaponClass == WeaponClass_Knife {
                     label += "  CQB"
                 } else if item.pointee.quantity > 0 {
@@ -912,6 +1025,7 @@ final class GameViewModel: ObservableObject {
             let routeSummary = routeSummary(from: statePointer, worldHalfSize: worldHalfSize)
             let campaignStatus = campaignStatusLine()
             let saveStatus = saveStatusLine()
+            let presentationLine = presentationStatusLine()
             let healthLine = "Health \(Int(game_player_health(statePointer))) | Pain \(Int(player.pain.rounded())) | Shock \(Int(player.staminaShock.rounded()))"
             let staminaLine = "Stamina \(Int(game_player_stamina(statePointer))) | Supp \(Int(player.suppression.rounded()))%"
             let woundLine = "Wounds \(woundSummary(for: UInt32(player.woundFlags))) | Fractures \(fractureSummary(for: UInt32(player.fractureFlags)))"
@@ -933,6 +1047,8 @@ final class GameViewModel: ObservableObject {
                 event: string(from: game_last_event(statePointer)),
                 weapon: selectedName,
                 ammo: ammoLine,
+                signature: signatureLine,
+                presentation: presentationLine,
                 posture: "\(stance)\(leanText)",
                 health: healthLine,
                 stamina: staminaLine,

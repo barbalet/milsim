@@ -42,6 +42,11 @@ struct MilsimGameApp: App {
                     viewModel.toggleMap()
                 }
                 .keyboardShortcut("m", modifiers: [])
+
+                Button("Toggle Presentation Mode") {
+                    viewModel.togglePresentation()
+                }
+                .keyboardShortcut("p", modifiers: [])
             }
         }
     }

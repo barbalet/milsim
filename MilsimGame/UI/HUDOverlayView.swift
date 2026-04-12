@@ -19,6 +19,7 @@ struct HUDOverlayView: View {
     let onLoadCampaign: () -> Void
     let onToggleFullScreen: () -> Void
     let onToggleMap: () -> Void
+    let onTogglePresentation: () -> Void
 
     var body: some View {
         ZStack {
@@ -45,6 +46,10 @@ struct HUDOverlayView: View {
                             .foregroundStyle(HUDPalette.sand)
                         Text(hud.ammo)
                             .foregroundStyle(HUDPalette.sand.opacity(0.95))
+                        Text(hud.signature)
+                            .foregroundStyle(HUDPalette.blue.opacity(0.88))
+                        Text(hud.presentation)
+                            .foregroundStyle(HUDPalette.green.opacity(0.88))
                         Text(hud.posture)
                             .foregroundStyle(HUDPalette.amber)
                         Text(hud.health)
@@ -102,7 +107,8 @@ struct HUDOverlayView: View {
                         Text("H treat wounds / use gauze or splint")
                         Text("C crouch   Z prone   Q/E lean")
                         Text("Tab or wheel cycle   1 2 3 select")
-                        Text("M tactical map   Ctrl+Cmd+F full screen")
+                        Text("P presentation mode   M tactical map")
+                        Text("Ctrl+Cmd+F full screen")
                         Text("Cmd+S save campaign   Cmd+L load campaign")
                     }
                     .frame(width: 300, alignment: .leading)
@@ -137,6 +143,7 @@ struct HUDOverlayView: View {
                         HStack(spacing: 10) {
                             Button("Restart", action: onRestart)
                             Button("Next Op", action: onNextMission)
+                            Button("View Mode", action: onTogglePresentation)
                             Button("Full Screen", action: onToggleFullScreen)
                         }
                         .buttonStyle(HUDButtonStyle())
