@@ -799,12 +799,13 @@ final class GameViewModel: ObservableObject {
                                       playerPosition: SIMD2<Float>,
                                       aim: SIMD2<Float>) -> String? {
         let forward = normalizedAimVector(aim)
+        let right = SIMD2<Float>(forward.y, -forward.x)
         var bestScore = Float.greatestFiniteMagnitude
         var bestHint: String?
 
         let interactableCount = Int(game_interactable_count(statePointer))
         for index in 0..<interactableCount {
-            guard let interactable = game_interactable_at(statePointer, index)?.pointee else {
+            guard let interactable = game_interactable_at(statePointer, index)?.pointee, interactable.active else {
                 continue
             }
 
@@ -815,12 +816,19 @@ final class GameViewModel: ObservableObject {
                 continue
             }
 
-            let facing = simd_dot(simd_normalize(offset), forward)
-            if facing < 0.32 {
+            let forwardDepth = simd_dot(offset, forward)
+            let lateral = abs(simd_dot(offset, right))
+            guard forwardDepth > 0.001 else {
                 continue
             }
 
-            let score = distance + max(0, 0.82 - facing) * 70
+            let corridor = lateral / max(forwardDepth, 1)
+            let facing = simd_dot(simd_normalize(offset), forward)
+            if facing < 0.1 || corridor > 0.92 {
+                continue
+            }
+
+            let score = forwardDepth + lateral * 1.45 + max(0, corridor - 0.18) * 96
             if score >= bestScore {
                 continue
             }
@@ -846,7 +854,7 @@ final class GameViewModel: ObservableObject {
 
         let worldItemCount = Int(game_world_item_count(statePointer))
         for index in 0..<worldItemCount {
-            guard let item = game_world_item_at(statePointer, index)?.pointee else {
+            guard let item = game_world_item_at(statePointer, index)?.pointee, item.active else {
                 continue
             }
 
@@ -857,12 +865,19 @@ final class GameViewModel: ObservableObject {
                 continue
             }
 
-            let facing = simd_dot(simd_normalize(offset), forward)
-            if facing < 0.26 {
+            let forwardDepth = simd_dot(offset, forward)
+            let lateral = abs(simd_dot(offset, right))
+            guard forwardDepth > 0.001 else {
                 continue
             }
 
-            let score = distance + max(0, 0.8 - facing) * 64
+            let corridor = lateral / max(forwardDepth, 1)
+            let facing = simd_dot(simd_normalize(offset), forward)
+            if facing < 0.08 || corridor > 0.88 {
+                continue
+            }
+
+            let score = forwardDepth + lateral * 1.28 + max(0, corridor - 0.18) * 88
             if score >= bestScore {
                 continue
             }

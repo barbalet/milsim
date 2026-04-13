@@ -22,6 +22,35 @@ struct RasterizerData {
     uint shape;
 };
 
+struct World3DVertex {
+    float3 position;
+    float3 normal;
+};
+
+struct World3DInstance {
+    float3 position;
+    float yaw;
+    float3 size;
+    float lighting;
+    float4 color;
+};
+
+struct World3DUniforms {
+    float4x4 viewProjectionMatrix;
+    float3 cameraPosition;
+    float fogStart;
+    float3 lightDirection;
+    float fogEnd;
+    float4 fogColor;
+};
+
+struct World3DRasterizerData {
+    float4 position [[position]];
+    float3 normal;
+    float4 color;
+    float fogAmount;
+};
+
 vertex RasterizerData instancedVertex(uint vertexID [[vertex_id]],
                                       uint instanceID [[instance_id]],
                                       const device float2 *quadVertices [[buffer(0)]],
@@ -62,3 +91,46 @@ fragment float4 instancedFragment(RasterizerData in [[stage_in]]) {
     return float4(in.color.rgb, alpha);
 }
 
+vertex World3DRasterizerData firstPersonWorldVertex(uint vertexID [[vertex_id]],
+                                                    uint instanceID [[instance_id]],
+                                                    const device World3DVertex *vertices [[buffer(0)]],
+                                                    const device World3DInstance *instances [[buffer(1)]],
+                                                    constant World3DUniforms &uniforms [[buffer(2)]]) {
+    World3DRasterizerData out;
+    World3DVertex cubeVertex = vertices[vertexID];
+    World3DInstance instance = instances[instanceID];
+
+    float sy = sin(instance.yaw);
+    float cy = cos(instance.yaw);
+
+    float3 scaledPosition = cubeVertex.position * instance.size;
+    float3 rotatedPosition = float3(
+        scaledPosition.x * cy - scaledPosition.z * sy,
+        scaledPosition.y,
+        scaledPosition.x * sy + scaledPosition.z * cy
+    );
+    float3 worldPosition = instance.position + rotatedPosition;
+
+    float3 rotatedNormal = normalize(float3(
+        cubeVertex.normal.x * cy - cubeVertex.normal.z * sy,
+        cubeVertex.normal.y,
+        cubeVertex.normal.x * sy + cubeVertex.normal.z * cy
+    ));
+
+    float diffuse = max(dot(rotatedNormal, normalize(-uniforms.lightDirection)), 0.0);
+    float shading = (0.34 + diffuse * 0.66) * instance.lighting;
+    float edgeTint = 0.92 + rotatedNormal.y * 0.08;
+    float distanceToCamera = distance(worldPosition, uniforms.cameraPosition);
+
+    out.position = uniforms.viewProjectionMatrix * float4(worldPosition, 1.0);
+    out.normal = rotatedNormal;
+    out.color = float4(instance.color.rgb * shading * edgeTint, instance.color.a);
+    out.fogAmount = smoothstep(uniforms.fogStart, uniforms.fogEnd, distanceToCamera);
+    return out;
+}
+
+fragment float4 firstPersonWorldFragment(World3DRasterizerData in [[stage_in]],
+                                         constant World3DUniforms &uniforms [[buffer(0)]]) {
+    float3 foggedColor = mix(in.color.rgb, uniforms.fogColor.rgb, in.fogAmount);
+    return float4(foggedColor, in.color.a);
+}

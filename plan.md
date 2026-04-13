@@ -85,6 +85,36 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Added panel-window coordination so the companion windows can be reopened from the menu bar and remain usable alongside a full-screen game window.
 - Preserved the main battlefield as the authoritative input window so panel launches restore focus back to the live mission instead of trapping movement input in a HUD panel.
 
+### True 3D First-Person World Pass Started
+
+- Replaced the first-person world layer’s flat projected sprites with a depth-tested Metal 3D scene built from terrain tiles, structures, interactables, pickups, enemies, and projectile volumes.
+- Separated the 3D battlefield pass from the 2D HUD and weapon overlay so camera composition, depth occlusion, and future sight alignment work can evolve without breaking the command shell.
+- Established the rendering foundation for follow-up passes on proper world meshes, terrain silhouette cleanup, viewmodel animation, and more exact optic/laser convergence.
+
+### True 3D First-Person Refinement Pass Added
+
+- Moved the first-person backdrop behind the 3D battlefield and added projected skyline silhouettes so the horizon reads more like distant terrain and structures instead of a flat overlay.
+- Refined the procedural 3D scene with more breakup on buildings, towers, and convoy hulks so the world pass is less blocky while it still uses placeholder box geometry.
+- Replaced heuristic aim depth and loose focus highlighting with world-hit reticle alignment, depth-aware laser/light placement, projected focus brackets, and tighter aim-corridor HUD prompts.
+
+### First-Person Combat Effects Pass Added
+
+- Added renderer-driven muzzle flashes for the player and enemies so live firefights now throw visible bursts from the weapon line instead of relying on tracers alone.
+- Added transient impact puffs and sparks keyed off projectile exits, with first-pass surface/material styling for dirt, stone, road, compound, convoy metal, and foliage strikes.
+- Added stronger first-person recoil and viewmodel animation with persistent kick, drift, roll, and walk-driven motion so the weapon and hands now react to fire and movement as a readable combat layer.
+
+### 3D Presentation Materials Pass Added
+
+- Broadened the first-person 3D terrain pass with road markings, compound pads, rock outcrops, mud sheen, grass breakup, and denser forest undergrowth so the battlefield starts reading as layered ground rather than flat placeholder slabs.
+- Added a terrain-aware skyline backdrop pass plus more breakup on ridges, buildings, walls, towers, convoys, crates, radios, and emplaced weapons so distance composition and nearby props both feel more authored.
+- Expanded impact feedback to use deeper surface-specific styling for stone, metal, mud, dust, and foliage, including secondary debris bursts on harder surfaces, so hits communicate what the round struck at a glance.
+
+### First-Person Weapon Handling Pass Added
+
+- Added renderer-side weapon swap transitions with raise-lower motion, smoother hand repositioning, and stance-aware carry offsets so switching between firearms, blades, and support gear reads as a deliberate presentation beat instead of an abrupt sprite swap.
+- Added first-pass reload choreography for firearms with tilted receiver motion, magazine extraction/insertion staging, and support-hand movement timed off live weapon state so reloads finally feel like an action instead of a cooldown number.
+- Reworked first-person recoil and melee presentation into spring-driven motion with slash trails, stronger knife swings, and more physical recovery on kick, drift, and roll so close-quarters handling feels more grounded and readable in motion.
+
 ## Cycle 0: Foundation and Playable Slice
 
 - Deliver a bootable macOS app with SwiftUI shell, Metal renderer, and C engine.
@@ -164,6 +194,19 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Formalize test plans for simulation, save/load, map logic, and multiplayer regression.
 - Exit criteria: the game is ready for closed external testing and a longer content roadmap.
 
+## Professional Polish Track
+
+1. Replace the remaining projection-style first-person presentation with a fully realized 3D combat view: cleaner terrain silhouettes, better cover edges, proper world meshes, and exact sight/laser convergence.
+2. Establish a coherent visual art direction across terrain, structures, props, pickups, materials, lighting, fog, muzzle flashes, and impact effects so the game stops reading as a prototype.
+3. Build a real animation layer for locomotion, stance changes, vaulting, reloads, recoil, melee, hit reactions, and deaths so combat and movement feel authored rather than abstract.
+4. Ship a production audio pass with distance-based gun reports, suppression cracks, footsteps by surface, gear handling, ambience, UI sounds, and mix tuning for tactical readability.
+5. Redesign the SwiftUI shell and HUD around production hierarchy: scalable text, cleaner information density, clearer urgency states, stronger panel behavior, and less debug-style presentation.
+6. Add a complete options stack for graphics quality, resolution behavior, mouse sensitivity, audio buses, key rebinding, fullscreen policy, and accessibility settings.
+7. Refine macOS input and window ergonomics so the battlefield, menus, and detachable panels always make focus and control ownership obvious to the player.
+8. Deepen AI polish with better cover use, search behavior, communication, suppression reactions, fallback logic, and small-unit coordination for both enemies and future friendlies.
+9. Create stronger authored mission presentation with briefings, debriefs, failure framing, progression rewards, and scenario scripting so operations feel curated as well as simulated.
+10. Finish with performance, stability, save migration, profiling, and regression coverage so the game is reliable enough for external testers and longer polish cycles.
+
 ## Environment and Tooling Plan
 
 - Keep gameplay rules in C for portability and deterministic testing.
@@ -174,7 +217,6 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Continue the `First-Person Presentation` pass with recoil camera motion, stronger muzzle and impact effects, and toggled attachment behavior beyond the current always-on visual feedback.
-- Expand mission scripting into branching triggers, authored objective phases, and richer campaign slots.
-- Continue Cycle 3 material response with more surface classes, ricochet behavior, and active attachment interactions beyond the current passive mounting model.
-- Start the first Cycle 4 command-layer pass with friendly AI teammates or lightweight fireteam orders once the current combat loop feels stable.
+- Start the first authored art-direction pass for terrain, structures, props, fog, and lighting so the improved 3D composition begins converging on a coherent visual language instead of just more detailed primitives.
+- Expand mission scripting into branching triggers, authored objective phases, and richer campaign slots once the presentation layer feels stable enough to showcase them.
+- Start the first Cycle 4 command-layer pass with friendly AI teammates or lightweight fireteam orders after the combat/readability passes stop moving core rendering assumptions.

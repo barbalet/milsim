@@ -158,6 +158,7 @@ final class TrackingMetalView: MTKView {
         super.init(frame: .zero, device: device)
 
         colorPixelFormat = .bgra8Unorm
+        depthStencilPixelFormat = .depth32Float
         clearColor = MTLClearColor(red: 0.02, green: 0.05, blue: 0.04, alpha: 1.0)
         preferredFramesPerSecond = 60
         framebufferOnly = false
