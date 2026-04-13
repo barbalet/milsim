@@ -132,7 +132,19 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Added a first-pass three-operator friendly fireteam that rides the live C simulation instead of a scripted HUD-only overlay.
 - Added lightweight `Follow`, `Hold`, and `Assault` orders with in-mission cycling plus SwiftUI command buttons so the player can shape spacing and tempo without leaving the firefight.
 - Extended enemy targeting and projectile handling so hostiles can now pressure friendly operators, while teammates return fire, push along the command route, and show their status across the operator panel, tactical map, and first-person presentation.
-- Residual follow-up: deepen order language into rules of engagement and breach/flank behavior, then layer mission scoring and richer alert/search reporting on top of the new command shell.
+
+### Cycle 4 Mission Scoring and Debrief Added
+
+- Added first-pass mission scoring around stealth, tempo, casualties, and recovered materiel so completed operations now resolve with more texture than simple pass/fail.
+- Added a post-operation debrief card in the mission panel with score bands and descriptive readouts, plus campaign-side best-score tracking per mission and per archive slot.
+- Wired the scoring model to live combat behavior by tracking friendly shot volume and loud reports inside the C simulation instead of inferring debrief quality from only kills and elapsed time.
+
+### Cycle 4 Enemy Alert and Search Reporting Added
+
+- Added explicit hostile awareness states for patrol, alert, search, engagement, and fallback so enemies can hold onto the last known squad position instead of dropping straight from contact back into patrol.
+- Reworked the command-shell reporting layer so radio traffic, tactical-map hostile labels, and route-pressure copy now reflect live awareness state and contact density rather than only patrol destinations.
+- Folded hostile alert/search/escalation events into the mission debrief’s stealth pressure so scoring now reacts to how widely the squad fight wakes up the map, not only to loud reports and elapsed time.
+- Residual follow-up: deepen fireteam order language into rules of engagement, breach/flank behaviors, and clearer command confirmation now that enemy contact reporting is live.
 
 ## Cycle 0: Foundation and Playable Slice
 
@@ -237,7 +249,5 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 ## Immediate Next Steps
 
 - Deepen the new Cycle 4 command-layer pass with tighter order language, rules of engagement, breach/flank behaviors, and clearer command feedback now that the first friendly fireteam loop is in place.
-- Add mission scoring for stealth, tempo, casualties, and recovered matériel so the command shell has outcome pressure beyond simple win/loss.
-- Build enemy alert/search reporting around the new fireteam contact model so radio traffic and map copy reflect how the squad fight is actually unfolding.
 - Carry the new visual direction into authored meshes, decals, impact materials, and eventually audio so the scene polish keeps compounding instead of stalling at palette, fog, and scripted mission copy.
 - Deepen the new campaign shell with slot metadata migration, longer branching chains, and debrief rewards once the first command-layer pass settles the broader mission structure.

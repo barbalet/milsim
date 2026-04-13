@@ -19,6 +19,12 @@ struct FireteamMemberRow: Identifiable {
     let isDowned: Bool
 }
 
+struct MissionScoreRow: Identifiable {
+    let id: Int
+    let label: String
+    let detail: String
+}
+
 enum FireteamOrderChoice: Int, CaseIterable, Identifiable {
     case follow
     case hold
@@ -151,6 +157,10 @@ struct HUDSnapshot {
     var fireteamOrder: FireteamOrderChoice = .follow
     var fireteamStatus = ""
     var fireteamMembers: [FireteamMemberRow] = []
+    var enemyActivity = ""
+    var scoreHeadline = ""
+    var scoreSummary = ""
+    var scoreRows: [MissionScoreRow] = []
     var health = ""
     var stamina = ""
     var wounds = ""
@@ -382,6 +392,24 @@ private struct MissionPresentationSnapshot {
     var campaignResult: String?
 }
 
+private struct MissionScoreSnapshot {
+    let total: Int
+    let grade: String
+    let summary: String
+    let stealth: Int
+    let tempo: Int
+    let casualties: Int
+    let materiel: Int
+}
+
+private struct EnemyContactSnapshot {
+    let engaged: Int
+    let search: Int
+    let alert: Int
+    let fallback: Int
+    let focusGrid: String?
+}
+
 private struct MissionCampaignStats: Codable {
     var attempts = 0
     var completions = 0
@@ -389,6 +417,8 @@ private struct MissionCampaignStats: Codable {
     var bestKills = 0
     var bestLoot = 0
     var intelRecovered = false
+    var bestScore = 0
+    var bestGrade = "Ungraded"
 }
 
 private struct CampaignProgress: Codable {
@@ -409,7 +439,7 @@ private struct CampaignSaveEnvelope: Codable {
 }
 
 private enum CampaignStore {
-    static let version = 5
+    static let version = 7
 
     static var supportDirectoryURL: URL {
         let fileManager = FileManager.default
@@ -1033,6 +1063,7 @@ final class GameViewModel: ObservableObject {
 
         let missionKey = GameContentBootstrap.missionKey(for: state.missionType)
         var stats = campaignProgress.missionStats[missionKey] ?? MissionCampaignStats()
+        let score = withUnsafePointer(to: &state) { missionScore(for: $0) }
         stats.attempts += 1
         stats.intelRecovered = stats.intelRecovered || state.radioIntelUnlocked
         let presentation = withUnsafePointer(to: &state) { missionPresentation(for: $0) }
@@ -1052,11 +1083,23 @@ final class GameViewModel: ObservableObject {
                 campaignProgress.completedMissions.append(missionKey)
                 campaignProgress.completedMissions.sort()
             }
-            campaignProgress.lastResult = presentation?.campaignResult
-                ?? "\(displayName(for: state.missionType)) cleared in \(missionTime)s."
+            if score.total >= stats.bestScore {
+                stats.bestScore = score.total
+                stats.bestGrade = score.grade
+            }
+            campaignProgress.lastResult = "\(score.grade) \(score.total) | " + (
+                presentation?.campaignResult
+                    ?? "\(displayName(for: state.missionType)) cleared in \(missionTime)s."
+            )
         } else {
-            campaignProgress.lastResult = presentation?.campaignResult
-                ?? "\(displayName(for: state.missionType)) ended with an operator loss."
+            if score.total >= stats.bestScore {
+                stats.bestScore = score.total
+                stats.bestGrade = score.grade
+            }
+            campaignProgress.lastResult = "\(score.grade) \(score.total) | " + (
+                presentation?.campaignResult
+                    ?? "\(displayName(for: state.missionType)) ended with an operator loss."
+            )
         }
 
         campaignProgress.missionStats[missionKey] = stats
@@ -1092,6 +1135,214 @@ final class GameViewModel: ObservableObject {
         GameContentBootstrap.missionType(for: missionKey).map(displayName(for:)) ?? "Operation"
     }
 
+    private func missionTempoTargets(for missionType: MissionType) -> (ideal: Int, steady: Int, late: Int) {
+        switch missionType {
+        case MissionType_CacheRaid:
+            return (ideal: 210, steady: 330, late: 520)
+        case MissionType_HostageRecovery:
+            return (ideal: 240, steady: 380, late: 560)
+        case MissionType_ReconExfil:
+            return (ideal: 280, steady: 430, late: 620)
+        case MissionType_ConvoyAmbush:
+            return (ideal: 220, steady: 350, late: 540)
+        default:
+            return (ideal: 240, steady: 360, late: 540)
+        }
+    }
+
+    private func missionGrade(for totalScore: Int) -> String {
+        switch totalScore {
+        case 92...:
+            return "S"
+        case 84...:
+            return "A"
+        case 74...:
+            return "B"
+        case 64...:
+            return "C"
+        case 50...:
+            return "D"
+        default:
+            return "E"
+        }
+    }
+
+    private func descriptor(forStealth score: Int) -> String {
+        switch score {
+        case 21...:
+            return "Low signature"
+        case 15...:
+            return "Managed contact"
+        case 9...:
+            return "Compromised"
+        default:
+            return "Loud assault"
+        }
+    }
+
+    private func descriptor(forTempo score: Int) -> String {
+        switch score {
+        case 21...:
+            return "Ahead of tempo"
+        case 15...:
+            return "On pace"
+        case 9...:
+            return "Delayed"
+        default:
+            return "Stalled route"
+        }
+    }
+
+    private func descriptor(forCasualties score: Int) -> String {
+        switch score {
+        case 21...:
+            return "Unit intact"
+        case 15...:
+            return "Manageable attrition"
+        case 9...:
+            return "Heavy hits taken"
+        default:
+            return "Combat ineffective"
+        }
+    }
+
+    private func descriptor(forMateriel score: Int) -> String {
+        switch score {
+        case 21...:
+            return "Strong recovery"
+        case 15...:
+            return "Useful haul"
+        case 9...:
+            return "Partial recovery"
+        default:
+            return "Thin pull"
+        }
+    }
+
+    private func missionScoreRows(from score: MissionScoreSnapshot) -> [MissionScoreRow] {
+        [
+            MissionScoreRow(id: 0, label: "Stealth \(score.stealth)/25", detail: descriptor(forStealth: score.stealth)),
+            MissionScoreRow(id: 1, label: "Tempo \(score.tempo)/25", detail: descriptor(forTempo: score.tempo)),
+            MissionScoreRow(id: 2, label: "Casualties \(score.casualties)/25", detail: descriptor(forCasualties: score.casualties)),
+            MissionScoreRow(id: 3, label: "Materiel \(score.materiel)/25", detail: descriptor(forMateriel: score.materiel))
+        ]
+    }
+
+    private func missionScoreSummary(for score: MissionScoreSnapshot, victory: Bool) -> String {
+        if victory {
+            if score.total >= 84 {
+                return "Objective secured with strong command discipline and a clean enough exfil."
+            }
+            if score.total >= 70 {
+                return "Package came out, but the route bled time or exposure before extraction."
+            }
+            return "Mission succeeded, though the squad paid in tempo, noise, or casualties."
+        }
+
+        if score.materiel >= 14 {
+            return "Some mission value came back, but the operation broke before a clean finish."
+        }
+        return "The operation collapsed before the team could turn the contact into a controlled exfil."
+    }
+
+    private func missionScore(for statePointer: UnsafePointer<GameState>) -> MissionScoreSnapshot {
+        let objectiveCount = Int(game_mission_objective_count(statePointer))
+        let objectiveTarget = max(1, Int(game_mission_objective_target(statePointer)))
+        let lootCount = Int(statePointer.pointee.collectedItemCount)
+        let playerShots = Int(statePointer.pointee.playerShotsFired)
+        let friendlyShots = Int(statePointer.pointee.friendlyShotsFired)
+        let loudReports = Int(statePointer.pointee.loudReportsTriggered)
+        let alertEvents = Int(statePointer.pointee.enemyAlertEvents)
+        let searchEvents = Int(statePointer.pointee.enemySearchEvents)
+        let engagementEvents = Int(statePointer.pointee.enemyEngagementEvents)
+        let kills = Int(statePointer.pointee.kills)
+        let missionTime = Int(statePointer.pointee.missionTime.rounded())
+        let tempoTargets = missionTempoTargets(for: statePointer.pointee.missionType)
+
+        var teammateDownCount = 0
+        var teammateWoundedCount = 0
+        let teammateCount = Int(game_teammate_count(statePointer))
+        for index in 0..<teammateCount {
+            guard let teammate = game_teammate_at(statePointer, index)?.pointee else {
+                continue
+            }
+            if teammate.downed {
+                teammateDownCount += 1
+            } else if teammate.health < 60 || teammate.bleedingRate > 0.2 {
+                teammateWoundedCount += 1
+            }
+        }
+
+        let reportPenalty = min(12, Int((Foundation.sqrt(Double(max(loudReports, 0))) * 4.0).rounded(.down)))
+        let playerShotPenalty = min(6, Int((Foundation.sqrt(Double(max(playerShots, 0))) * 1.9).rounded(.down)))
+        let contactPressure = max(0, alertEvents + searchEvents * 2 + engagementEvents * 3)
+        let alertPenalty = min(8, Int((Foundation.sqrt(Double(contactPressure)) * 1.7).rounded(.down)))
+        let killPenalty = min(5, max(0, kills - objectiveCount))
+        var stealth = max(0, 25 - reportPenalty - playerShotPenalty - alertPenalty - killPenalty)
+        if statePointer.pointee.victory && loudReports == 0 && engagementEvents == 0 {
+            stealth = min(25, stealth + 2)
+        }
+        if friendlyShots <= 6 {
+            stealth = min(25, stealth + 1)
+        }
+        if searchEvents == 0 && engagementEvents == 0 {
+            stealth = min(25, stealth + 1)
+        }
+
+        let tempo: Int
+        if missionTime <= tempoTargets.ideal {
+            tempo = 25
+        } else if missionTime <= tempoTargets.steady {
+            let progress = Double(missionTime - tempoTargets.ideal) / Double(max(1, tempoTargets.steady - tempoTargets.ideal))
+            tempo = max(0, 25 - Int((progress * 8.0).rounded()))
+        } else if missionTime <= tempoTargets.late {
+            let progress = Double(missionTime - tempoTargets.steady) / Double(max(1, tempoTargets.late - tempoTargets.steady))
+            tempo = max(0, 17 - Int((progress * 10.0).rounded()))
+        } else {
+            let overrun = Double(missionTime - tempoTargets.late) / Double(max(tempoTargets.late, 1))
+            tempo = max(0, 7 - Int((overrun * 12.0).rounded()))
+        }
+
+        let casualties: Int
+        if statePointer.pointee.missionFailed {
+            casualties = 0
+        } else {
+            let playerPenalty = Int(((100 - max(0, Int(statePointer.pointee.player.health.rounded()))) / 10))
+            let casualtyPenalty = teammateDownCount * 7 + teammateWoundedCount * 2 + playerPenalty
+            casualties = max(0, 25 - casualtyPenalty)
+        }
+
+        let objectiveRatio = Double(objectiveCount) / Double(objectiveTarget)
+        var materiel = Int((objectiveRatio * 12.0).rounded())
+        materiel += min(6, lootCount)
+        materiel += statePointer.pointee.radioIntelUnlocked ? 3 : 0
+        materiel += statePointer.pointee.victory ? 4 : (game_mission_ready_for_extract(statePointer) ? 2 : 0)
+        materiel = min(25, max(0, materiel))
+
+        let total = max(0, min(100, stealth + tempo + casualties + materiel))
+        let grade = missionGrade(for: total)
+        return MissionScoreSnapshot(
+            total: total,
+            grade: grade,
+            summary: missionScoreSummary(
+                for: MissionScoreSnapshot(
+                    total: total,
+                    grade: grade,
+                    summary: "",
+                    stealth: stealth,
+                    tempo: tempo,
+                    casualties: casualties,
+                    materiel: materiel
+                ),
+                victory: statePointer.pointee.victory
+            ),
+            stealth: stealth,
+            tempo: tempo,
+            casualties: casualties,
+            materiel: materiel
+        )
+    }
+
     private func timestampString(from date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -1104,6 +1355,14 @@ final class GameViewModel: ObservableObject {
         let totalMissions = 4
         let intelCount = campaignProgress.missionStats.values.filter(\.intelRecovered).count
         return "Slot \(activeCampaignSlot.title) | Campaign \(completedCount)/\(totalMissions) ops cleared | Intel nets copied \(intelCount) | \(campaignProgress.lastResult)"
+    }
+
+    private func topScoreSummary(for campaign: CampaignProgress) -> String {
+        let rankedStats = campaign.missionStats.values.filter { $0.bestScore > 0 }
+        guard let bestStat = rankedStats.max(by: { $0.bestScore < $1.bestScore }) else {
+            return "Top score pending"
+        }
+        return "Top \(bestStat.bestGrade) \(bestStat.bestScore)"
     }
 
     private func saveStatusLine() -> String {
@@ -1119,7 +1378,7 @@ final class GameViewModel: ObservableObject {
                 let completedCount = archive.campaign.completedMissions.count
                 let missionName = displayName(forMissionKey: archive.mission)
                 let savedAt = timestampString(from: archive.savedAt)
-                let detail = "\(completedCount)/4 ops | \(missionName) | \(savedAt)"
+                let detail = "\(completedCount)/4 ops | \(missionName) | \(topScoreSummary(for: archive.campaign)) | \(savedAt)"
                 return CampaignSlotSummary(
                     id: slot,
                     title: slot.title,
@@ -1571,6 +1830,8 @@ final class GameViewModel: ObservableObject {
             let mapTiles = buildMapTiles(from: statePointer)
             let mapMarkers = buildMapMarkers(from: statePointer, playerPosition: playerPosition, radioIntelUnlocked: radioIntelUnlocked)
             let routeSegments = buildRouteSegments(from: statePointer)
+            let enemyContact = enemyContactSnapshot(from: statePointer, worldHalfSize: worldHalfSize)
+            let enemyActivity = enemyActivitySummary(for: enemyContact, radioIntelUnlocked: radioIntelUnlocked)
             let routeSummary = missionPresentation?.routeSummary ?? routeSummary(from: statePointer, worldHalfSize: worldHalfSize)
             let campaignStatus = campaignStatusLine()
             let saveStatus = saveStatusLine()
@@ -1630,6 +1891,10 @@ final class GameViewModel: ObservableObject {
             }
 
             let fireteamStatus = "Order \(fireteamOrder.title) | \(fireteamUpCount)/\(teammateCount) up | \(fireteamEngagedCount) engaging"
+            let missionScore = missionScore(for: statePointer)
+            let scoreHeadline = "\(missionScore.grade) | \(missionScore.total)/100"
+            let scoreSummary = missionScore.summary
+            let scoreRows = missionScoreRows(from: missionScore)
             let healthLine = "Health \(Int(game_player_health(statePointer))) | Pain \(Int(player.pain.rounded())) | Shock \(Int(player.staminaShock.rounded()))"
             let staminaLine = "Stamina \(Int(game_player_stamina(statePointer))) | Supp \(Int(player.suppression.rounded()))%"
             let woundLine = "Wounds \(woundSummary(for: UInt32(player.woundFlags))) | Fractures \(fractureSummary(for: UInt32(player.fractureFlags)))"
@@ -1661,6 +1926,10 @@ final class GameViewModel: ObservableObject {
                 fireteamOrder: fireteamOrder,
                 fireteamStatus: fireteamStatus,
                 fireteamMembers: fireteamMembers,
+                enemyActivity: enemyActivity,
+                scoreHeadline: scoreHeadline,
+                scoreSummary: scoreSummary,
+                scoreRows: scoreRows,
                 health: healthLine,
                 stamina: staminaLine,
                 wounds: woundLine,
@@ -1847,16 +2116,130 @@ final class GameViewModel: ObservableObject {
                     continue
                 }
 
+                let presentation = enemyMarkerPresentation(for: enemy)
+
                 appendMarker(
                     position: SIMD2<Float>(enemy.position.x, enemy.position.y),
                     kind: .enemy,
-                    label: "Hostile",
-                    prominent: false
+                    label: presentation.label,
+                    prominent: presentation.prominent
                 )
             }
         }
 
         return markers
+    }
+
+    private func enemyMarkerPresentation(for enemy: Enemy) -> (label: String, prominent: Bool) {
+        switch enemy.awarenessState {
+        case EnemyAwarenessState_Engaged:
+            return ("Contact", true)
+        case EnemyAwarenessState_Search:
+            return ("Search", true)
+        case EnemyAwarenessState_Fallback:
+            return ("Fallback", true)
+        case EnemyAwarenessState_Alert:
+            return ("Alert", false)
+        case EnemyAwarenessState_Patrol:
+            return ("Hostile", false)
+        default:
+            return ("Hostile", false)
+        }
+    }
+
+    private func enemyContactSnapshot(from statePointer: UnsafePointer<GameState>,
+                                      worldHalfSize: SIMD2<Float>) -> EnemyContactSnapshot {
+        let enemyCount = Int(game_enemy_count(statePointer))
+        var engaged = 0
+        var search = 0
+        var alert = 0
+        var fallback = 0
+        var focusPosition: SIMD2<Float>?
+        var focusPriority = -1
+
+        for index in 0..<enemyCount {
+            guard let enemy = game_enemy_at(statePointer, index)?.pointee else {
+                continue
+            }
+
+            let position = SIMD2<Float>(enemy.position.x, enemy.position.y)
+            switch enemy.awarenessState {
+            case EnemyAwarenessState_Engaged:
+                engaged += 1
+                if focusPriority < 3 {
+                    focusPriority = 3
+                    focusPosition = position
+                }
+            case EnemyAwarenessState_Search:
+                search += 1
+                if focusPriority < 2 {
+                    focusPriority = 2
+                    focusPosition = position
+                }
+            case EnemyAwarenessState_Fallback:
+                fallback += 1
+                if focusPriority < 2 {
+                    focusPriority = 2
+                    focusPosition = position
+                }
+            case EnemyAwarenessState_Alert:
+                alert += 1
+                if focusPriority < 1 {
+                    focusPriority = 1
+                    focusPosition = position
+                }
+            case EnemyAwarenessState_Patrol:
+                if focusPriority < 0 {
+                    focusPriority = 0
+                    focusPosition = position
+                }
+            default:
+                break
+            }
+        }
+
+        return EnemyContactSnapshot(
+            engaged: engaged,
+            search: search,
+            alert: alert,
+            fallback: fallback,
+            focusGrid: focusPosition.map { gridReference(for: $0, worldHalfSize: worldHalfSize) }
+        )
+    }
+
+    private func enemyActivitySummary(for snapshot: EnemyContactSnapshot, radioIntelUnlocked: Bool) -> String {
+        if !radioIntelUnlocked {
+            return "Enemy net unavailable. Recover a relay to track hostile alert and search movement."
+        }
+
+        let focusSuffix = snapshot.focusGrid.map { " | Focus \($0)" } ?? ""
+        if snapshot.engaged > 0 {
+            var parts = ["\(snapshot.engaged) engaging"]
+            if snapshot.search > 0 {
+                parts.append("\(snapshot.search) searching")
+            }
+            if snapshot.fallback > 0 {
+                parts.append("\(snapshot.fallback) falling back")
+            }
+            return "Enemy net: " + parts.joined(separator: " | ") + focusSuffix
+        }
+        if snapshot.search > 0 {
+            var parts = ["\(snapshot.search) searching"]
+            if snapshot.alert > 0 {
+                parts.append("\(snapshot.alert) alerted")
+            }
+            if snapshot.fallback > 0 {
+                parts.append("\(snapshot.fallback) breaking")
+            }
+            return "Enemy net: " + parts.joined(separator: " | ") + focusSuffix
+        }
+        if snapshot.alert > 0 {
+            return "Enemy net: \(snapshot.alert) alerted" + focusSuffix
+        }
+        if snapshot.fallback > 0 {
+            return "Enemy net: \(snapshot.fallback) breaking contact" + focusSuffix
+        }
+        return "Enemy net: patrol traffic only."
     }
 
     private func buildRouteSegments(from statePointer: UnsafePointer<GameState>) -> [TacticalRouteSegment] {
@@ -1907,6 +2290,19 @@ final class GameViewModel: ObservableObject {
             worldHalfSize: worldHalfSize
         )
         let objectiveReady = game_mission_ready_for_extract(statePointer)
+        let snapshot = enemyContactSnapshot(from: statePointer, worldHalfSize: worldHalfSize)
+        if game_radio_intel_unlocked(statePointer), let focusGrid = snapshot.focusGrid {
+            if snapshot.engaged > 0 {
+                return objectiveReady
+                    ? "Extraction route contested near \(focusGrid)"
+                    : "Command route crosses active contact at \(focusGrid)"
+            }
+            if snapshot.search > 0 {
+                return objectiveReady
+                    ? "Extraction route brushes a search line at \(focusGrid)"
+                    : "Command route skirts a search sector near \(focusGrid)"
+            }
+        }
         return objectiveReady ? "Command route to extraction at \(destinationGrid)" : "Command route to search sector \(destinationGrid)"
     }
 

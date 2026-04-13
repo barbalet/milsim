@@ -89,6 +89,14 @@ typedef enum FireteamOrder {
     FireteamOrder_Assault = 2
 } FireteamOrder;
 
+typedef enum EnemyAwarenessState {
+    EnemyAwarenessState_Patrol = 0,
+    EnemyAwarenessState_Alert = 1,
+    EnemyAwarenessState_Search = 2,
+    EnemyAwarenessState_Engaged = 3,
+    EnemyAwarenessState_Fallback = 4
+} EnemyAwarenessState;
+
 typedef enum StructureKind {
     StructureKind_None = 0,
     StructureKind_Ridge = 1,
@@ -240,6 +248,9 @@ typedef struct Enemy {
     unsigned int woundFlags;
     unsigned int fractureFlags;
     bool fallingBack;
+    EnemyAwarenessState awarenessState;
+    float awarenessTimer;
+    Vec2 lastKnownTargetPosition;
     int currentNavNode;
     int targetNavNode;
 } Enemy;
@@ -364,6 +375,12 @@ typedef struct GameState {
     int commandRouteCount;
     int collectedItemCount;
     int kills;
+    int playerShotsFired;
+    int friendlyShotsFired;
+    int loudReportsTriggered;
+    int enemyAlertEvents;
+    int enemySearchEvents;
+    int enemyEngagementEvents;
     FireteamOrder fireteamOrder;
     bool victory;
     bool missionFailed;

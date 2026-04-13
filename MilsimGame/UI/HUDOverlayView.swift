@@ -73,30 +73,8 @@ struct MissionPanelView: View {
     var body: some View {
         let hud = viewModel.hud
 
-        HUDPanelChrome(title: "Mission") {
-            Text(hud.missionName)
-                .font(.system(size: 22, weight: .black, design: .monospaced))
-                .foregroundStyle(HUDPalette.sand)
-            Text(hud.missionBrief)
-                .foregroundStyle(HUDPalette.sand.opacity(0.92))
-            Text(hud.missionPhase)
-                .foregroundStyle(HUDPalette.blue.opacity(0.9))
-            Text(hud.missionBranch)
-                .foregroundStyle(HUDPalette.green.opacity(0.9))
-            Text(hud.objective)
-                .foregroundStyle(HUDPalette.amber)
-            Text(hud.event)
-                .foregroundStyle(HUDPalette.sand.opacity(0.82))
-
-            if hud.victory || hud.failed {
-                Divider()
-                    .overlay(HUDPalette.olive.opacity(0.85))
-                    .padding(.vertical, 6)
-
-                Text(hud.victory ? "Operation complete." : "Mission failed.")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                    .foregroundStyle(hud.victory ? HUDPalette.green : HUDPalette.alert)
-
+        if hud.victory || hud.failed {
+            HUDTextWindowChrome(text: missionPanelText(for: hud)) {
                 HStack(spacing: 10) {
                     Button("Restart") {
                         viewModel.reset()
@@ -108,6 +86,8 @@ struct MissionPanelView: View {
                 .buttonStyle(HUDButtonStyle())
                 .padding(.top, 4)
             }
+        } else {
+            HUDTextWindowChrome(text: missionPanelText(for: hud))
         }
     }
 }
@@ -116,41 +96,7 @@ struct OperatorPanelView: View {
     @ObservedObject var viewModel: GameViewModel
 
     var body: some View {
-        let hud = viewModel.hud
-
-        HUDPanelChrome(title: "Operator") {
-            Text(hud.weapon)
-                .font(.system(size: 19, weight: .bold, design: .monospaced))
-                .foregroundStyle(HUDPalette.sand)
-            Text(hud.ammo)
-                .foregroundStyle(HUDPalette.sand.opacity(0.95))
-            Text(hud.signature)
-                .foregroundStyle(HUDPalette.blue.opacity(0.88))
-            Text(hud.presentation)
-                .foregroundStyle(HUDPalette.green.opacity(0.88))
-            Text(hud.presentationAssist)
-                .foregroundStyle(HUDPalette.sand.opacity(0.86))
-            Text(hud.posture)
-                .foregroundStyle(HUDPalette.amber)
-            Text(hud.fireteamStatus)
-                .foregroundStyle(HUDPalette.blue.opacity(0.92))
-            ForEach(hud.fireteamMembers) { member in
-                Text("\(member.name) | \(member.detail)")
-                    .foregroundStyle(member.isDowned ? HUDPalette.alert.opacity(0.94) : HUDPalette.sand.opacity(0.84))
-            }
-            Text(hud.health)
-                .foregroundStyle(HUDPalette.sand)
-            Text(hud.stamina)
-                .foregroundStyle(HUDPalette.sand)
-            Text(hud.wounds)
-                .foregroundStyle(HUDPalette.alert.opacity(0.92))
-            Text(hud.medical)
-                .foregroundStyle(HUDPalette.green.opacity(0.92))
-            Text("\(hud.compass) | Grid \(hud.gridReference)")
-                .foregroundStyle(HUDPalette.blue.opacity(0.92))
-            Text(hud.mission)
-                .foregroundStyle(HUDPalette.sand.opacity(0.8))
-        }
+        HUDTextWindowChrome(text: operatorPanelText(for: viewModel.hud))
     }
 }
 
@@ -180,6 +126,8 @@ struct TacticalMapPanelView: View {
                     .foregroundStyle(HUDPalette.blue.opacity(0.92))
                 Text(hud.radioReport)
                     .foregroundStyle(HUDPalette.green.opacity(0.92))
+                Text(hud.enemyActivity)
+                    .foregroundStyle(HUDPalette.alert.opacity(0.9))
                 Text(hud.fireteamStatus)
                     .foregroundStyle(HUDPalette.amber)
 
@@ -219,19 +167,7 @@ struct TacticalMapPanelView: View {
 
 struct ControlsPanelView: View {
     var body: some View {
-        HUDPanelChrome(title: "Controls") {
-            Text("WASD move   Shift sprint")
-            Text("Mouse aim   Left Mouse / Space fire")
-            Text("F or Right Mouse use / recover")
-            Text("R reload   B fire mode   V vault")
-            Text("H treat wounds / use gauze or splint")
-            Text("T cycle fireteam order")
-            Text("C crouch   Z prone   Q/E lean")
-            Text("Tab or wheel cycle   1 2 3 select")
-            Text("P presentation mode   M tactical map")
-            Text("Ctrl+Cmd+F full screen")
-            Text("Cmd+S save campaign   Cmd+L load campaign")
-        }
+        HUDTextWindowChrome(text: controlsPanelText)
     }
 }
 
@@ -241,96 +177,53 @@ struct LoadoutPanelView: View {
     var body: some View {
         let hud = viewModel.hud
 
-        HUDPanelChrome(title: "Loadout") {
-            if hud.inventory.isEmpty {
-                Text("No equipment recovered")
-                    .foregroundStyle(HUDPalette.sand.opacity(0.85))
-            } else {
-                ForEach(hud.inventory) { row in
-                    Text(row.label)
-                        .font(.system(size: 13, weight: row.isSelected ? .bold : .regular, design: .monospaced))
-                        .foregroundStyle(row.isSelected ? HUDPalette.amber : HUDPalette.sand)
-                }
-            }
-
-            Text(hud.campaignStatus)
-                .foregroundStyle(HUDPalette.blue.opacity(0.92))
-                .padding(.top, 6)
-            Text(hud.saveStatus)
-                .foregroundStyle(HUDPalette.green.opacity(0.9))
-
-            Divider()
-                .overlay(HUDPalette.olive.opacity(0.85))
-                .padding(.vertical, 6)
-
-            Text("CAMPAIGN SLOTS")
-                .font(.system(size: 11, weight: .black, design: .monospaced))
-                .kerning(1.6)
-                .foregroundStyle(HUDPalette.amber)
-
-            ForEach(hud.campaignSlots) { slot in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(slot.title)
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundStyle(slot.isActive ? HUDPalette.amber : HUDPalette.sand)
-                        if slot.isActive {
-                            Text("ACTIVE")
-                                .font(.system(size: 10, weight: .black, design: .monospaced))
-                                .kerning(1.2)
-                                .foregroundStyle(HUDPalette.green)
-                        }
-                    }
-
-                    Text(slot.detail)
-                        .foregroundStyle(HUDPalette.sand.opacity(0.82))
-
+        HUDTextWindowChrome(text: loadoutPanelText(for: hud)) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(hud.campaignSlots) { slot in
                     HStack(spacing: 10) {
-                        Button(slot.isActive ? "Selected" : "Use") {
+                        Button(slot.isActive ? "Selected" : "Use \(slot.title)") {
                             viewModel.setCampaignSlot(slot.id)
                         }
                         .disabled(slot.isActive)
 
-                        Button("Save") {
+                        Button("Save \(slot.title)") {
                             viewModel.saveCampaign(to: slot.id)
                         }
 
-                        Button("Load") {
+                        Button("Load \(slot.title)") {
                             _ = viewModel.loadCampaign(from: slot.id)
                         }
                         .disabled(!slot.hasArchive)
                     }
                     .buttonStyle(HUDButtonStyle())
                 }
-                .padding(.vertical, 4)
-            }
 
-            HStack(spacing: 10) {
-                Button("Save") {
-                    viewModel.saveCampaign()
+                HStack(spacing: 10) {
+                    Button("Save Active") {
+                        viewModel.saveCampaign()
+                    }
+                    Button("Load Active") {
+                        _ = viewModel.loadCampaign()
+                    }
                 }
-                Button("Load") {
-                    _ = viewModel.loadCampaign()
-                }
-            }
-            .buttonStyle(HUDButtonStyle())
-            .padding(.top, 8)
+                .buttonStyle(HUDButtonStyle())
 
-            HStack(spacing: 10) {
-                Button("Restart") {
-                    viewModel.reset()
+                HStack(spacing: 10) {
+                    Button("Restart") {
+                        viewModel.reset()
+                    }
+                    Button("Next Op") {
+                        viewModel.nextMission()
+                    }
+                    Button("View Mode") {
+                        viewModel.togglePresentation()
+                    }
+                    Button("Full Screen") {
+                        WindowCoordinator.toggleGameFullScreen()
+                    }
                 }
-                Button("Next Op") {
-                    viewModel.nextMission()
-                }
-                Button("View Mode") {
-                    viewModel.togglePresentation()
-                }
-                Button("Full Screen") {
-                    WindowCoordinator.toggleGameFullScreen()
-                }
+                .buttonStyle(HUDButtonStyle())
             }
-            .buttonStyle(HUDButtonStyle())
         }
     }
 }
@@ -439,6 +332,204 @@ private struct HUDPanelChrome<Content: View>: View {
             content()
         }
     }
+}
+
+private struct HUDTextWindowChrome<Footer: View>: View {
+    let text: String
+    let showsFooter: Bool
+    let footer: Footer
+
+    init(text: String) where Footer == EmptyView {
+        self.text = text
+        self.showsFooter = false
+        self.footer = EmptyView()
+    }
+
+    init(text: String, @ViewBuilder footer: () -> Footer) {
+        self.text = text
+        self.showsFooter = true
+        self.footer = footer()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SelectableTextWindow(text: text)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if showsFooter {
+                Divider()
+
+                footer
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(nsColor: .windowBackgroundColor))
+            }
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+private struct SelectableTextWindow: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView(frame: .zero)
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .textBackgroundColor
+
+        let textView = NSTextView(frame: .zero)
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.usesFindPanel = true
+        textView.drawsBackground = false
+        textView.backgroundColor = .clear
+        textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.textColor = .textColor
+        textView.textContainerInset = NSSize(width: 18, height: 18)
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.string = text
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else {
+            return
+        }
+
+        if textView.selectedRange().length > 0 {
+            return
+        }
+
+        if textView.string != text {
+            textView.string = text
+        }
+    }
+}
+
+private let controlsPanelText = """
+Controls
+
+WASD move   Shift sprint
+Mouse aim   Left Mouse / Space fire
+F or Right Mouse use / recover
+R reload   B fire mode   V vault
+H treat wounds / use gauze or splint
+T cycle fireteam order
+C crouch   Z prone   Q/E lean
+Tab or wheel cycle   1 2 3 select
+P presentation mode   M tactical map
+Ctrl+Cmd+F full screen
+Cmd+S save campaign   Cmd+L load campaign
+"""
+
+private func missionPanelText(for hud: HUDSnapshot) -> String {
+    var lines: [String] = []
+    append(line: hud.missionName, to: &lines)
+    append(blankLineTo: &lines)
+    append(line: hud.missionBrief, to: &lines)
+    append(blankLineTo: &lines)
+    append(line: hud.missionPhase, to: &lines)
+    append(line: hud.missionBranch, to: &lines)
+    append(line: hud.objective, to: &lines)
+    append(line: hud.enemyActivity, to: &lines)
+    append(line: hud.event, to: &lines)
+
+    if hud.victory || hud.failed {
+        append(blankLineTo: &lines)
+        append(line: hud.victory ? "Operation complete." : "Mission failed.", to: &lines)
+        append(line: hud.scoreHeadline, to: &lines)
+        append(line: hud.scoreSummary, to: &lines)
+
+        for row in hud.scoreRows {
+            append(line: "\(row.label) | \(row.detail)", to: &lines)
+        }
+    }
+
+    return lines.joined(separator: "\n")
+}
+
+private func operatorPanelText(for hud: HUDSnapshot) -> String {
+    var lines: [String] = []
+    append(line: hud.weapon, to: &lines)
+    append(line: hud.ammo, to: &lines)
+    append(line: hud.signature, to: &lines)
+    append(line: hud.presentation, to: &lines)
+    append(line: hud.presentationAssist, to: &lines)
+    append(line: hud.posture, to: &lines)
+    append(blankLineTo: &lines)
+    append(line: hud.fireteamStatus, to: &lines)
+    append(line: hud.enemyActivity, to: &lines)
+
+    for member in hud.fireteamMembers {
+        append(line: "\(member.name) | \(member.detail)", to: &lines)
+    }
+
+    append(blankLineTo: &lines)
+    append(line: hud.health, to: &lines)
+    append(line: hud.stamina, to: &lines)
+    append(line: hud.wounds, to: &lines)
+    append(line: hud.medical, to: &lines)
+    append(line: "\(hud.compass) | Grid \(hud.gridReference)", to: &lines)
+    append(line: hud.mission, to: &lines)
+    return lines.joined(separator: "\n")
+}
+
+private func loadoutPanelText(for hud: HUDSnapshot) -> String {
+    var lines: [String] = []
+    append(line: "Loadout", to: &lines)
+    append(blankLineTo: &lines)
+
+    if hud.inventory.isEmpty {
+        append(line: "No equipment recovered", to: &lines)
+    } else {
+        append(line: "Recovered Equipment", to: &lines)
+        for row in hud.inventory {
+            let marker = row.isSelected ? ">" : "-"
+            append(line: "\(marker) \(row.label)", to: &lines)
+        }
+    }
+
+    append(blankLineTo: &lines)
+    append(line: hud.campaignStatus, to: &lines)
+    append(line: hud.saveStatus, to: &lines)
+    append(blankLineTo: &lines)
+    append(line: "Campaign Slots", to: &lines)
+
+    for slot in hud.campaignSlots {
+        let status = slot.isActive ? "ACTIVE" : (slot.hasArchive ? "ARCHIVED" : "EMPTY")
+        append(line: "\(slot.title) | \(status)", to: &lines)
+        append(line: slot.detail, to: &lines)
+        append(blankLineTo: &lines)
+    }
+
+    return lines.joined(separator: "\n")
+}
+
+private func append(line: String, to lines: inout [String]) {
+    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return
+    }
+    lines.append(trimmed)
+}
+
+private func append(blankLineTo lines: inout [String]) {
+    guard let last = lines.last, !last.isEmpty else {
+        return
+    }
+    lines.append("")
 }
 
 private struct TacticalMapView: View {

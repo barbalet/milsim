@@ -107,6 +107,12 @@ static void apply_player_suppression(GameState *state, float amount, bool announ
 static void apply_player_hit(GameState *state, float damage, Vec2 impactVelocity);
 static void apply_enemy_hit(GameState *state, Enemy *enemy, float damage, Vec2 impactVelocity, bool announce);
 static void apply_teammate_hit(GameState *state, Teammate *teammate, float damage, Vec2 impactVelocity);
+static void set_enemy_awareness(GameState *state,
+                                Enemy *enemy,
+                                EnemyAwarenessState awarenessState,
+                                Vec2 focalPoint,
+                                float timer);
+static void alert_nearby_enemies(GameState *state, Vec2 focalPoint, float radius, float timer);
 static void treat_wounds(GameState *state);
 static bool selected_weapon_has_light(const GameState *state);
 static bool selected_weapon_has_laser(const GameState *state);
@@ -216,6 +222,107 @@ static const char *fireteam_order_name(FireteamOrder order) {
         case FireteamOrder_Follow:
         default:
             return "Follow";
+    }
+}
+
+static int enemy_awareness_priority(EnemyAwarenessState awarenessState) {
+    switch (awarenessState) {
+        case EnemyAwarenessState_Engaged:
+        case EnemyAwarenessState_Fallback:
+            return 3;
+        case EnemyAwarenessState_Search:
+            return 2;
+        case EnemyAwarenessState_Alert:
+            return 1;
+        case EnemyAwarenessState_Patrol:
+        default:
+            return 0;
+    }
+}
+
+static void set_enemy_awareness(GameState *state,
+                                Enemy *enemy,
+                                EnemyAwarenessState awarenessState,
+                                Vec2 focalPoint,
+                                float timer) {
+    EnemyAwarenessState previousAwareness;
+
+    if (state == NULL || enemy == NULL || !enemy->active) {
+        return;
+    }
+
+    previousAwareness = enemy->awarenessState;
+    if (awarenessState == EnemyAwarenessState_Patrol) {
+        enemy->awarenessState = EnemyAwarenessState_Patrol;
+        enemy->awarenessTimer = 0.0f;
+        enemy->lastKnownTargetPosition = enemy->position;
+        return;
+    }
+
+    timer = clampf(timer, 0.0f, 24.0f);
+    enemy->lastKnownTargetPosition = focalPoint;
+
+    if (enemy_awareness_priority(awarenessState) < enemy_awareness_priority(previousAwareness)) {
+        enemy->awarenessTimer = clampf(fmaxf(enemy->awarenessTimer, timer * 0.72f), 0.0f, 24.0f);
+        return;
+    }
+
+    enemy->awarenessTimer = clampf(fmaxf(enemy->awarenessTimer, timer), 0.0f, 24.0f);
+    if (previousAwareness == awarenessState) {
+        return;
+    }
+
+    enemy->awarenessState = awarenessState;
+    switch (awarenessState) {
+        case EnemyAwarenessState_Alert:
+            if (previousAwareness == EnemyAwarenessState_Patrol) {
+                state->enemyAlertEvents += 1;
+            }
+            break;
+        case EnemyAwarenessState_Search:
+            if (previousAwareness != EnemyAwarenessState_Search) {
+                state->enemySearchEvents += 1;
+            }
+            break;
+        case EnemyAwarenessState_Engaged:
+            if (previousAwareness != EnemyAwarenessState_Engaged) {
+                state->enemyEngagementEvents += 1;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+static void alert_nearby_enemies(GameState *state, Vec2 focalPoint, float radius, float timer) {
+    size_t index;
+
+    if (state == NULL || radius <= 0.0f) {
+        return;
+    }
+
+    for (index = 0; index < GAME_MAX_ENEMIES; index += 1) {
+        Enemy *enemy = &state->enemies[index];
+        float distance;
+        float scaledTimer;
+
+        if (!enemy->active) {
+            continue;
+        }
+
+        distance = vec2_distance(enemy->position, focalPoint);
+        if (distance > radius) {
+            continue;
+        }
+
+        scaledTimer = timer * clampf(1.0f - (distance / radius) * 0.45f, 0.55f, 1.0f);
+        if (enemy->awarenessState == EnemyAwarenessState_Engaged || enemy->awarenessState == EnemyAwarenessState_Fallback) {
+            enemy->lastKnownTargetPosition = focalPoint;
+            enemy->awarenessTimer = clampf(fmaxf(enemy->awarenessTimer, scaledTimer), 0.0f, 24.0f);
+            continue;
+        }
+
+        set_enemy_awareness(state, enemy, EnemyAwarenessState_Alert, focalPoint, scaledTimer);
     }
 }
 
@@ -1179,6 +1286,14 @@ static void update_radio_report(GameState *state, float dt) {
     const MissionScriptDefinition *script = mission_script_for(state->missionType);
     const char *callsign = (script != NULL && script->interceptCallsign[0] != '\0') ? script->interceptCallsign : "Intercept";
     Enemy *reportEnemy = NULL;
+    Enemy *fallbackEnemy = NULL;
+    Enemy *searchEnemy = NULL;
+    Enemy *alertEnemy = NULL;
+    Enemy *patrolEnemy = NULL;
+    int engagedCount = 0;
+    int searchCount = 0;
+    int alertCount = 0;
+    int fallbackCount = 0;
     size_t index;
 
     state->radioReportCooldown = clampf(state->radioReportCooldown - dt, 0.0f, 600.0f);
@@ -1198,12 +1313,44 @@ static void update_radio_report(GameState *state, float dt) {
 
     for (index = 0; index < GAME_MAX_ENEMIES; index += 1) {
         if (state->enemies[index].active) {
-            reportEnemy = &state->enemies[index];
-            break;
+            Enemy *enemy = &state->enemies[index];
+            if (patrolEnemy == NULL) {
+                patrolEnemy = enemy;
+            }
+
+            switch (enemy->awarenessState) {
+                case EnemyAwarenessState_Engaged:
+                    engagedCount += 1;
+                    if (reportEnemy == NULL) {
+                        reportEnemy = enemy;
+                    }
+                    break;
+                case EnemyAwarenessState_Search:
+                    searchCount += 1;
+                    if (searchEnemy == NULL) {
+                        searchEnemy = enemy;
+                    }
+                    break;
+                case EnemyAwarenessState_Alert:
+                    alertCount += 1;
+                    if (alertEnemy == NULL) {
+                        alertEnemy = enemy;
+                    }
+                    break;
+                case EnemyAwarenessState_Fallback:
+                    fallbackCount += 1;
+                    if (fallbackEnemy == NULL) {
+                        fallbackEnemy = enemy;
+                    }
+                    break;
+                case EnemyAwarenessState_Patrol:
+                default:
+                    break;
+            }
         }
     }
 
-    if (reportEnemy == NULL) {
+    if (patrolEnemy == NULL) {
         if (script != NULL && script->clearReport[0] != '\0') {
             copy_name(state->radioReport, sizeof(state->radioReport), script->clearReport);
         } else {
@@ -1213,22 +1360,68 @@ static void update_radio_report(GameState *state, float dt) {
         return;
     }
 
-    grid_reference_for_position(reportEnemy->position, fromGrid, sizeof(fromGrid));
-    if (reportEnemy->targetNavNode >= 0 && reportEnemy->targetNavNode < GAME_MAX_NAV_NODES &&
-        state->navigationNodes[reportEnemy->targetNavNode].active) {
-        grid_reference_for_position(state->navigationNodes[reportEnemy->targetNavNode].position, toGrid, sizeof(toGrid));
+    if (reportEnemy != NULL) {
+        grid_reference_for_position(reportEnemy->position, fromGrid, sizeof(fromGrid));
+        grid_reference_for_position(reportEnemy->lastKnownTargetPosition, toGrid, sizeof(toGrid));
+        if (searchCount > 0) {
+            snprintf(state->radioReport,
+                     sizeof(state->radioReport),
+                     "%s: %d engaging at %s, %d searching %s.",
+                     callsign,
+                     engagedCount,
+                     fromGrid,
+                     searchCount,
+                     toGrid);
+        } else {
+            snprintf(state->radioReport,
+                     sizeof(state->radioReport),
+                     "%s: %d engaging near %s.",
+                     callsign,
+                     engagedCount,
+                     fromGrid);
+        }
+    } else if (searchEnemy != NULL) {
+        grid_reference_for_position(searchEnemy->lastKnownTargetPosition, toGrid, sizeof(toGrid));
         snprintf(state->radioReport,
                  sizeof(state->radioReport),
-                 "%s: patrol shifting from %s toward %s.",
+                 "%s: %d sweeping sector %s.",
                  callsign,
-                 fromGrid,
+                 searchCount,
                  toGrid);
-    } else {
+    } else if (alertEnemy != NULL) {
+        grid_reference_for_position(alertEnemy->lastKnownTargetPosition, toGrid, sizeof(toGrid));
         snprintf(state->radioReport,
                  sizeof(state->radioReport),
-                 "%s: hostile chatter centered on sector %s.",
+                 "%s: alert net building around %s.",
                  callsign,
+                 toGrid);
+    } else if (fallbackEnemy != NULL) {
+        grid_reference_for_position(fallbackEnemy->position, fromGrid, sizeof(fromGrid));
+        snprintf(state->radioReport,
+                 sizeof(state->radioReport),
+                 "%s: %d breaking contact through %s.",
+                 callsign,
+                 fallbackCount,
                  fromGrid);
+    } else {
+        reportEnemy = patrolEnemy;
+        grid_reference_for_position(reportEnemy->position, fromGrid, sizeof(fromGrid));
+        if (reportEnemy->targetNavNode >= 0 && reportEnemy->targetNavNode < GAME_MAX_NAV_NODES &&
+            state->navigationNodes[reportEnemy->targetNavNode].active) {
+            grid_reference_for_position(state->navigationNodes[reportEnemy->targetNavNode].position, toGrid, sizeof(toGrid));
+            snprintf(state->radioReport,
+                     sizeof(state->radioReport),
+                     "%s: patrol shifting from %s toward %s.",
+                     callsign,
+                     fromGrid,
+                     toGrid);
+        } else {
+            snprintf(state->radioReport,
+                     sizeof(state->radioReport),
+                     "%s: hostile chatter centered on sector %s.",
+                     callsign,
+                     fromGrid);
+        }
     }
 
     state->radioReportCooldown = 6.0f;
@@ -1488,6 +1681,9 @@ static void add_enemy(GameState *state, Vec2 position, float patrolPhase) {
             state->enemies[index].woundFlags = WoundFlag_None;
             state->enemies[index].fractureFlags = FractureFlag_None;
             state->enemies[index].fallingBack = false;
+            state->enemies[index].awarenessState = EnemyAwarenessState_Patrol;
+            state->enemies[index].awarenessTimer = 0.0f;
+            state->enemies[index].lastKnownTargetPosition = position;
             state->enemies[index].currentNavNode = nearest_navigation_node(state, position);
             state->enemies[index].targetNavNode = -1;
             return;
@@ -1729,11 +1925,13 @@ static void apply_enemy_hit(GameState *state, Enemy *enemy, float damage, Vec2 i
     float severity;
     float damageMultiplier = 1.0f;
     bool severeHit = false;
+    Vec2 contactOrigin;
 
     if (enemy == NULL || !enemy->active) {
         return;
     }
 
+    contactOrigin = vec2_sub(enemy->position, vec2_scale(vec2_normalize(impactVelocity), 140.0f));
     woundFlag = choose_enemy_wound_flag(state, enemy, impactVelocity);
     severity = clampf((damage / 16.0f) + (vec2_length(impactVelocity) / 1500.0f), 0.4f, 1.8f);
 
@@ -1782,6 +1980,13 @@ static void apply_enemy_hit(GameState *state, Enemy *enemy, float damage, Vec2 i
     if (severeHit || enemy->health < 36.0f || enemy->suppression > 54.0f) {
         enemy->fallingBack = true;
     }
+
+    set_enemy_awareness(state,
+                        enemy,
+                        enemy->fallingBack ? EnemyAwarenessState_Fallback : EnemyAwarenessState_Engaged,
+                        contactOrigin,
+                        enemy->fallingBack ? 8.0f : 10.0f);
+    alert_nearby_enemies(state, contactOrigin, 320.0f, 5.8f);
 
     if (enemy->health <= 0.0f) {
         enemy->active = false;
@@ -2796,6 +3001,12 @@ static void fire_selected_weapon(GameState *state) {
                      item->damage,
                      weapon_penetration_power(item),
                      true);
+    state->playerShotsFired += 1;
+    state->friendlyShotsFired += 1;
+    if (!item->suppressed) {
+        state->loudReportsTriggered += 1;
+        alert_nearby_enemies(state, state->player.position, 520.0f, 5.8f);
+    }
     state->player.noiseTimer = weapon_report_duration(item);
     state->player.suppression = clampf(state->player.suppression - 4.0f, 0.0f, 100.0f);
 }
@@ -2993,7 +3204,10 @@ static void update_projectiles(GameState *state, float dt) {
                     break;
                 } else if (!projectile->nearMissApplied && vec2_distance(projectile->position, enemy->position) < 86.0f) {
                     float crackSuppression = projectile->initialSpeed > 940.0f ? 22.0f : 16.0f;
+                    Vec2 contactOrigin = vec2_sub(enemy->position, vec2_scale(vec2_normalize(projectile->velocity), 120.0f));
                     enemy->suppression = clampf(enemy->suppression + crackSuppression, 0.0f, 100.0f);
+                    set_enemy_awareness(state, enemy, EnemyAwarenessState_Alert, contactOrigin, 4.2f);
+                    alert_nearby_enemies(state, contactOrigin, 220.0f, 3.5f);
                     projectile->nearMissApplied = true;
                 }
             }
@@ -3171,6 +3385,9 @@ static void update_teammates(GameState *state, float dt) {
                                      840.0f,
                                      true);
                 }
+                state->friendlyShotsFired += 1;
+                state->loudReportsTriggered += 1;
+                alert_nearby_enemies(state, teammate->position, 460.0f, 5.0f);
                 teammate->fireCooldown = 0.82f +
                                          0.12f * (float) index +
                                          teammate->suppression * 0.009f +
@@ -3227,8 +3444,10 @@ static void update_enemies(GameState *state, float dt) {
         float distanceToTarget;
         float enemyHeight;
         bool hasTarget = false;
+        bool searchingLastKnown = false;
         bool targetIsPlayer = true;
         bool targetInConcealment = player_in_concealment(state);
+        EnemyAwarenessState previousAwareness = enemy->awarenessState;
         int targetNavNode = -1;
 
         if (!enemy->active) {
@@ -3241,6 +3460,7 @@ static void update_enemies(GameState *state, float dt) {
         enemy->bleedingRate = clampf(enemy->bleedingRate - (0.05f * dt), 0.0f, 8.0f);
         enemy->health = clampf(enemy->health - (enemy->bleedingRate * dt), 0.0f, 100.0f);
         enemy->hitTimer = clampf(enemy->hitTimer - dt, 0.0f, 10.0f);
+        enemy->awarenessTimer = clampf(enemy->awarenessTimer - dt, 0.0f, 24.0f);
         if (enemy->health <= 0.0f) {
             enemy->active = false;
             state->kills += 1;
@@ -3304,6 +3524,14 @@ static void update_enemies(GameState *state, float dt) {
             }
         }
 
+        if (!hasTarget && enemy->awarenessTimer > 0.0f && enemy->awarenessState != EnemyAwarenessState_Patrol) {
+            targetPosition = enemy->lastKnownTargetPosition;
+            targetIsPlayer = false;
+            targetInConcealment = false;
+            targetNavNode = nearest_navigation_node(state, targetPosition);
+            searchingLastKnown = true;
+        }
+
         aimDirection = vec2_normalize(vec2_sub(targetPosition, enemy->position));
         distanceToTarget = vec2_distance(enemy->position, targetPosition);
 
@@ -3313,11 +3541,34 @@ static void update_enemies(GameState *state, float dt) {
             enemy->pain < 18.0f &&
             enemy->bleedingRate < 0.3f) {
             enemy->fallingBack = false;
+            if (hasTarget) {
+                set_enemy_awareness(state, enemy, EnemyAwarenessState_Engaged, targetPosition, 7.0f);
+            }
         }
 
         enemy->fireCooldown = clampf(enemy->fireCooldown - dt, 0.0f, 100.0f);
 
-        if (enemy->fallingBack && hasTarget && distanceToTarget < 560.0f) {
+        if (hasTarget) {
+            set_enemy_awareness(state,
+                                enemy,
+                                enemy->fallingBack ? EnemyAwarenessState_Fallback : EnemyAwarenessState_Engaged,
+                                targetPosition,
+                                enemy->fallingBack ? 8.0f : 9.0f);
+            if (previousAwareness != EnemyAwarenessState_Engaged &&
+                previousAwareness != EnemyAwarenessState_Fallback) {
+                alert_nearby_enemies(state, targetPosition, 340.0f, 4.8f);
+            }
+        } else if (searchingLastKnown) {
+            if (enemy->fallingBack) {
+                set_enemy_awareness(state, enemy, EnemyAwarenessState_Fallback, targetPosition, fmaxf(enemy->awarenessTimer, 3.0f));
+            } else {
+                set_enemy_awareness(state, enemy, EnemyAwarenessState_Search, targetPosition, fmaxf(enemy->awarenessTimer, 4.0f));
+            }
+        } else if (enemy->awarenessState != EnemyAwarenessState_Patrol) {
+            set_enemy_awareness(state, enemy, EnemyAwarenessState_Patrol, enemy->position, 0.0f);
+        }
+
+        if (enemy->fallingBack && (hasTarget || searchingLastKnown) && distanceToTarget < 560.0f) {
             float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
             float moveSpeed = 104.0f * terrainMultiplier;
             float movePenalty = 1.0f - clampf(enemy->suppression * 0.0028f, 0.0f, 0.36f);
@@ -3409,6 +3660,33 @@ static void update_enemies(GameState *state, float dt) {
                                       enemy->suppression * 0.01f +
                                       enemy->pain * 0.006f +
                                       (((enemy->fractureFlags & FractureFlag_Arm) != 0) ? 0.18f : 0.0f);
+            }
+        } else if (searchingLastKnown) {
+            float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
+            float movePenalty = 1.0f - clampf(enemy->suppression * 0.0027f, 0.0f, 0.34f);
+            Vec2 moveDirection = aimDirection;
+
+            if ((enemy->woundFlags & WoundFlag_Leg) != 0) {
+                movePenalty *= 0.86f;
+            }
+            if ((enemy->fractureFlags & FractureFlag_Leg) != 0) {
+                movePenalty *= 0.66f;
+            }
+            movePenalty *= (1.0f - clampf(enemy->pain * 0.0028f, 0.0f, 0.2f));
+
+            enemy->currentNavNode = nearest_navigation_node(state, enemy->position);
+            enemy->targetNavNode = targetNavNode;
+
+            if (distanceToTarget > 42.0f) {
+                float moveSpeed = 72.0f * terrainMultiplier * clampf(movePenalty, 0.32f, 1.0f);
+                enemy->velocity = vec2_scale(moveDirection, moveSpeed);
+                attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, dt)));
+            } else {
+                float scanAngle = state->missionTime * 0.74f + enemy->patrolPhase * 2.2f;
+                enemy->velocity = vec2_make(cosf(scanAngle), sinf(scanAngle));
+                attempt_move_enemy(state,
+                                   enemy,
+                                   vec2_add(enemy->position, vec2_scale(enemy->velocity, 20.0f * terrainMultiplier * dt)));
             }
         } else {
             if (enemy->currentNavNode < 0) {
