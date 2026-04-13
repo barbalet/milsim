@@ -220,10 +220,11 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         }
         lastFrameTime = now
 
-        let simulationViewport = SIMD2<Float>(
-            Float(view.drawableSize.width) * 1.08,
-            Float(view.drawableSize.height) * 1.08
+        let logicalViewport = SIMD2<Float>(
+            max(Float(view.bounds.width), 1),
+            max(Float(view.bounds.height), 1)
         )
+        let simulationViewport = logicalViewport * 1.08
 
         let input = inputController.makeInput(viewSize: view.bounds.size, worldViewport: simulationViewport)
         viewModel.step(input: input, dt: deltaTime)

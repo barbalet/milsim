@@ -161,9 +161,11 @@ final class TrackingMetalView: MTKView {
         clearColor = MTLClearColor(red: 0.02, green: 0.05, blue: 0.04, alpha: 1.0)
         preferredFramesPerSecond = 60
         framebufferOnly = false
+        autoResizeDrawable = false
         enableSetNeedsDisplay = false
         isPaused = false
         wantsLayer = true
+        updateDrawableResolution()
     }
 
     @available(*, unavailable)
@@ -177,6 +179,17 @@ final class TrackingMetalView: MTKView {
         super.viewDidMoveToWindow()
         window?.acceptsMouseMovedEvents = true
         window?.makeFirstResponder(self)
+        updateDrawableResolution()
+    }
+
+    override func layout() {
+        super.layout()
+        updateDrawableResolution()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateDrawableResolution()
     }
 
     override func updateTrackingAreas() {
@@ -239,6 +252,24 @@ final class TrackingMetalView: MTKView {
             inputController.queueAction(.cycleNext)
         } else if event.scrollingDeltaY > 0 {
             inputController.queueAction(.cyclePrevious)
+        }
+    }
+
+    private func updateDrawableResolution() {
+        let scale = window?.backingScaleFactor
+            ?? window?.screen?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? 1.0
+
+        layer?.contentsScale = scale
+
+        let scaledSize = CGSize(
+            width: max(bounds.width * scale, 1),
+            height: max(bounds.height * scale, 1)
+        )
+
+        if drawableSize != scaledSize {
+            drawableSize = scaledSize
         }
     }
 }
