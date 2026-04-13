@@ -140,6 +140,10 @@ private struct World3DUniforms {
     var lightDirection: SIMD3<Float>
     var fogEnd: Float
     var fogColor: SIMD4<Float>
+    var sunColor: SIMD4<Float>
+    var ambientColor: SIMD4<Float>
+    var shadowColor: SIMD4<Float>
+    var hazeColor: SIMD4<Float>
 }
 
 private struct FirstPersonCameraRig {
@@ -1035,6 +1039,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             )
             let positionXZ = renderWorldPosition(worldPosition)
             let yaw = structure.rotation
+            let palette = structurePalette(for: structure.kind)
 
             switch structure.kind {
             case StructureKind_Ridge:
@@ -1043,7 +1048,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + height * 0.5, positionXZ.y),
                     size: SIMD3<Float>(footprint.x * 1.08, height, footprint.y * 1.08),
-                    color: SIMD4<Float>(0.34, 0.27, 0.18, 0.98),
+                    color: palette.primary,
                     yaw: yaw,
                     lighting: 0.98
                 )
@@ -1051,7 +1056,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + height + 0.08, positionXZ.y),
                     size: SIMD3<Float>(footprint.x * 0.82, 0.16, footprint.y * 0.82),
-                    color: SIMD4<Float>(0.52, 0.42, 0.26, 0.94),
+                    color: palette.secondary,
                     yaw: yaw,
                     lighting: 0.92
                 )
@@ -1060,7 +1065,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.018, positionXZ.y),
                     size: SIMD3<Float>(footprint.x * 1.02, 0.035, footprint.y * 1.02),
-                    color: SIMD4<Float>(0.18, 0.19, 0.19, 1.0),
+                    color: palette.primary,
                     yaw: yaw,
                     lighting: 0.92
                 )
@@ -1070,21 +1075,21 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + trunkHeight * 0.5, positionXZ.y),
                     size: SIMD3<Float>(0.24, trunkHeight, 0.24),
-                    color: SIMD4<Float>(0.28, 0.2, 0.13, 0.98),
+                    color: palette.primary,
                     lighting: 0.9
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - footprint.x * 0.12, ground + 2.15, positionXZ.y),
                     size: SIMD3<Float>(max(1.0, footprint.x * 0.84), 1.55, max(1.0, footprint.y * 0.84)),
-                    color: SIMD4<Float>(0.17, 0.39, 0.2, 0.96),
+                    color: palette.secondary,
                     lighting: 0.9
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + footprint.x * 0.16, ground + 2.55, positionXZ.y + footprint.y * 0.1),
                     size: SIMD3<Float>(max(0.82, footprint.x * 0.58), 1.12, max(0.82, footprint.y * 0.58)),
-                    color: SIMD4<Float>(0.12, 0.3, 0.16, 0.96),
+                    color: palette.accent,
                     lighting: 0.88
                 )
             case StructureKind_Building:
@@ -1094,14 +1099,14 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + height * 0.5, positionXZ.y),
                     size: shellSize,
-                    color: SIMD4<Float>(0.48, 0.46, 0.4, 0.99),
+                    color: palette.primary,
                     yaw: yaw
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + height + 0.12, positionXZ.y),
                     size: SIMD3<Float>(footprint.x * 1.02, 0.18, footprint.y * 1.02),
-                    color: SIMD4<Float>(0.26, 0.27, 0.28, 0.98),
+                    color: palette.secondary,
                     yaw: yaw,
                     lighting: 0.94
                 )
@@ -1109,7 +1114,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + height * 0.52, positionXZ.y + shellSize.z * 0.46),
                     size: SIMD3<Float>(max(0.12, shellSize.x * 0.18), max(0.64, height * 0.44), 0.12),
-                    color: SIMD4<Float>(0.18, 0.18, 0.17, 0.94),
+                    color: palette.accent,
                     yaw: yaw,
                     lighting: 0.86
                 )
@@ -1117,7 +1122,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - shellSize.x * 0.22, ground + height * 0.56, positionXZ.y + shellSize.z * 0.47),
                     size: SIMD3<Float>(max(0.18, shellSize.x * 0.16), max(0.24, height * 0.14), 0.08),
-                    color: SIMD4<Float>(0.18, 0.2, 0.23, 0.88),
+                    color: mixedColor(palette.accent, palette.secondary, amount: 0.16),
                     yaw: yaw,
                     lighting: 0.82
                 )
@@ -1125,7 +1130,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + shellSize.x * 0.22, ground + height * 0.56, positionXZ.y + shellSize.z * 0.47),
                     size: SIMD3<Float>(max(0.18, shellSize.x * 0.16), max(0.24, height * 0.14), 0.08),
-                    color: SIMD4<Float>(0.18, 0.2, 0.23, 0.88),
+                    color: mixedColor(palette.accent, palette.secondary, amount: 0.16),
                     yaw: yaw,
                     lighting: 0.82
                 )
@@ -1133,14 +1138,14 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - shellSize.x * 0.38, ground + 0.18, positionXZ.y + shellSize.z * 0.42),
                     size: SIMD3<Float>(max(0.22, shellSize.x * 0.18), 0.24, 0.22),
-                    color: SIMD4<Float>(0.52, 0.48, 0.4, 0.94),
+                    color: mixedColor(palette.primary, palette.secondary, amount: 0.18),
                     yaw: yaw
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + shellSize.x * 0.34, ground + height + 0.42, positionXZ.y - shellSize.z * 0.18),
                     size: SIMD3<Float>(max(0.18, shellSize.x * 0.16), 0.32, max(0.18, shellSize.z * 0.16)),
-                    color: SIMD4<Float>(0.18, 0.19, 0.19, 0.96),
+                    color: mixedColor(palette.accent, palette.secondary, amount: 0.08),
                     yaw: yaw,
                     lighting: 0.88
                 )
@@ -1149,7 +1154,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.38, positionXZ.y),
                     size: SIMD3<Float>(footprint.x, 0.76, max(0.08, footprint.y)),
-                    color: SIMD4<Float>(0.7, 0.67, 0.56, 0.99),
+                    color: palette.primary,
                     yaw: yaw,
                     lighting: 0.98
                 )
@@ -1157,7 +1162,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.78, positionXZ.y),
                     size: SIMD3<Float>(footprint.x * 0.94, 0.08, max(0.08, footprint.y * 0.82)),
-                    color: SIMD4<Float>(0.82, 0.78, 0.66, 0.96),
+                    color: palette.secondary,
                     yaw: yaw,
                     lighting: 0.92
                 )
@@ -1165,7 +1170,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - footprint.x * 0.36, ground + 0.42, positionXZ.y),
                     size: SIMD3<Float>(0.12, 0.84, max(0.08, footprint.y * 0.78)),
-                    color: SIMD4<Float>(0.64, 0.61, 0.5, 0.94),
+                    color: palette.accent,
                     yaw: yaw,
                     lighting: 0.9
                 )
@@ -1173,7 +1178,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + footprint.x * 0.36, ground + 0.42, positionXZ.y),
                     size: SIMD3<Float>(0.12, 0.84, max(0.08, footprint.y * 0.78)),
-                    color: SIMD4<Float>(0.64, 0.61, 0.5, 0.94),
+                    color: palette.accent,
                     yaw: yaw,
                     lighting: 0.9
                 )
@@ -1184,21 +1189,21 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + shaftHeight * 0.5, positionXZ.y),
                     size: SIMD3<Float>(shaftWidth, shaftHeight, max(0.28, footprint.y * 0.38)),
-                    color: SIMD4<Float>(0.52, 0.49, 0.41, 0.98),
+                    color: palette.primary,
                     lighting: 0.94
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + shaftHeight + 0.18, positionXZ.y),
                     size: SIMD3<Float>(max(0.8, footprint.x * 0.92), 0.24, max(0.8, footprint.y * 0.92)),
-                    color: SIMD4<Float>(0.25, 0.23, 0.2, 0.98),
+                    color: palette.secondary,
                     lighting: 0.9
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + shaftHeight * 0.56, positionXZ.y),
                     size: SIMD3<Float>(max(0.86, footprint.x * 0.96), 0.12, 0.12),
-                    color: SIMD4<Float>(0.33, 0.31, 0.26, 0.94),
+                    color: palette.accent,
                     yaw: yaw + Float.pi * 0.25,
                     lighting: 0.84
                 )
@@ -1208,7 +1213,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                             to: &instances,
                             position: SIMD3<Float>(positionXZ.x + xSign * footprint.x * 0.28, ground + shaftHeight * 0.46, positionXZ.y + zSign * footprint.y * 0.28),
                             size: SIMD3<Float>(0.08, shaftHeight * 0.88, 0.08),
-                            color: SIMD4<Float>(0.36, 0.33, 0.28, 0.94),
+                            color: mixedColor(palette.accent, palette.primary, amount: 0.12),
                             lighting: 0.86
                         )
                     }
@@ -1219,7 +1224,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.62, positionXZ.y),
                     size: hullSize,
-                    color: SIMD4<Float>(0.24, 0.28, 0.25, 0.99),
+                    color: palette.primary,
                     yaw: yaw,
                     lighting: 0.96
                 )
@@ -1227,56 +1232,56 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - footprint.x * 0.14, ground + 1.12, positionXZ.y),
                     size: SIMD3<Float>(max(0.2, footprint.x * 0.36), 0.44, max(0.16, footprint.y * 0.52)),
-                    color: SIMD4<Float>(0.13, 0.14, 0.14, 0.98),
+                    color: palette.secondary,
                     yaw: yaw
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - hullSize.x * 0.06, ground + 1.08, positionXZ.y),
                     size: SIMD3<Float>(max(0.18, hullSize.x * 0.3), 0.12, max(0.14, hullSize.z * 0.56)),
-                    color: SIMD4<Float>(0.26, 0.34, 0.38, 0.78),
+                    color: palette.accent,
                     yaw: yaw
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + hullSize.x * 0.24, ground + 0.48, positionXZ.y),
                     size: SIMD3<Float>(max(0.16, hullSize.x * 0.18), 0.58, max(0.14, hullSize.z * 0.54)),
-                    color: SIMD4<Float>(0.18, 0.21, 0.19, 0.96),
+                    color: mixedColor(palette.secondary, palette.primary, amount: 0.18),
                     yaw: yaw
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - hullSize.x * 0.18, ground + 0.14, positionXZ.y + hullSize.z * 0.42),
                     size: SIMD3<Float>(max(0.12, hullSize.x * 0.18), 0.18, 0.12),
-                    color: SIMD4<Float>(0.06, 0.06, 0.06, 0.96),
+                    color: mixedColor(palette.secondary, SIMD4<Float>(0.08, 0.08, 0.08, 0.96), amount: 0.2),
                     yaw: yaw
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - hullSize.x * 0.18, ground + 0.14, positionXZ.y - hullSize.z * 0.42),
                     size: SIMD3<Float>(max(0.12, hullSize.x * 0.18), 0.18, 0.12),
-                    color: SIMD4<Float>(0.06, 0.06, 0.06, 0.96),
+                    color: mixedColor(palette.secondary, SIMD4<Float>(0.08, 0.08, 0.08, 0.96), amount: 0.2),
                     yaw: yaw
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + hullSize.x * 0.18, ground + 0.14, positionXZ.y + hullSize.z * 0.42),
                     size: SIMD3<Float>(max(0.12, hullSize.x * 0.18), 0.18, 0.12),
-                    color: SIMD4<Float>(0.06, 0.06, 0.06, 0.96),
+                    color: mixedColor(palette.secondary, SIMD4<Float>(0.08, 0.08, 0.08, 0.96), amount: 0.2),
                     yaw: yaw
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + hullSize.x * 0.18, ground + 0.14, positionXZ.y - hullSize.z * 0.42),
                     size: SIMD3<Float>(max(0.12, hullSize.x * 0.18), 0.18, 0.12),
-                    color: SIMD4<Float>(0.06, 0.06, 0.06, 0.96),
+                    color: mixedColor(palette.secondary, SIMD4<Float>(0.08, 0.08, 0.08, 0.96), amount: 0.2),
                     yaw: yaw
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + hullSize.x * 0.08, ground + 1.28, positionXZ.y),
                     size: SIMD3<Float>(max(0.16, hullSize.x * 0.54), 0.08, max(0.16, hullSize.z * 0.82)),
-                    color: SIMD4<Float>(0.18, 0.21, 0.18, 0.92),
+                    color: mixedColor(palette.primary, palette.secondary, amount: 0.1),
                     yaw: yaw,
                     lighting: 0.86
                 )
@@ -1299,7 +1304,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             let positionXZ = renderWorldPosition(worldPosition)
             let width = max(0.12, interactable.size.x * FirstPerson3DConfig.horizontalScale)
             let depth = max(0.08, interactable.size.y * FirstPerson3DConfig.horizontalScale * 0.42)
-            let baseColor = interactableColor(kind: interactable.kind, toggled: interactable.toggled, singleUse: interactable.singleUse)
+            let palette = interactablePalette(kind: interactable.kind, toggled: interactable.toggled, singleUse: interactable.singleUse)
 
             switch interactable.kind {
             case InteractableKind_Door:
@@ -1309,7 +1314,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.9, positionXZ.y),
                     size: SIMD3<Float>(doorWidth, 1.8, max(0.06, depth)),
-                    color: SIMD4<Float>(baseColor.x, baseColor.y, baseColor.z, 0.98),
+                    color: palette.primary,
                     yaw: doorYaw,
                     lighting: interactable.toggled ? 0.86 : 1.0
                 )
@@ -1318,27 +1323,27 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.28, positionXZ.y),
                     size: SIMD3<Float>(width * 0.72, 0.56, depth * 1.4),
-                    color: SIMD4<Float>(baseColor.x, baseColor.y, baseColor.z, 0.99)
+                    color: palette.primary
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.6, positionXZ.y),
                     size: SIMD3<Float>(width * 0.66, 0.08, depth * 1.28),
-                    color: SIMD4<Float>(0.92, 0.93, 0.95, 0.94),
+                    color: palette.secondary,
                     lighting: 0.88
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - width * 0.18, ground + 0.76, positionXZ.y),
                     size: SIMD3<Float>(width * 0.18, 0.12, depth * 0.34),
-                    color: SIMD4<Float>(0.22, 0.24, 0.24, 0.96),
+                    color: palette.accent,
                     lighting: 0.86
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.06, positionXZ.y),
                     size: SIMD3<Float>(width * 0.84, 0.06, depth * 1.5),
-                    color: SIMD4<Float>(0.38, 0.24, 0.14, 0.92),
+                    color: mixedColor(palette.accent, palette.primary, amount: 0.22),
                     lighting: 0.82
                 )
             case InteractableKind_DeadDrop:
@@ -1346,7 +1351,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.1, positionXZ.y),
                     size: SIMD3<Float>(width * 0.6, 0.2, depth * 0.9),
-                    color: SIMD4<Float>(baseColor.x, baseColor.y, baseColor.z, 0.98),
+                    color: palette.primary,
                     lighting: 0.9
                 )
             case InteractableKind_Radio:
@@ -1354,34 +1359,34 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.42, positionXZ.y),
                     size: SIMD3<Float>(width * 0.4, 0.84, depth * 0.5),
-                    color: SIMD4<Float>(baseColor.x, baseColor.y, baseColor.z, 0.99)
+                    color: palette.primary
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 1.06, positionXZ.y),
                     size: SIMD3<Float>(0.04, 0.46, 0.04),
-                    color: SIMD4<Float>(0.9, 0.95, 0.93, 0.94),
+                    color: palette.secondary,
                     lighting: 0.86
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.08, positionXZ.y),
                     size: SIMD3<Float>(width * 0.52, 0.08, depth * 0.84),
-                    color: SIMD4<Float>(0.18, 0.2, 0.18, 0.96),
+                    color: palette.accent,
                     lighting: 0.82
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - width * 0.12, ground + 0.42, positionXZ.y),
                     size: SIMD3<Float>(0.04, 0.56, 0.04),
-                    color: SIMD4<Float>(0.76, 0.8, 0.78, 0.92),
+                    color: palette.secondary,
                     lighting: 0.84
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + width * 0.12, ground + 0.42, positionXZ.y),
                     size: SIMD3<Float>(0.04, 0.56, 0.04),
-                    color: SIMD4<Float>(0.76, 0.8, 0.78, 0.92),
+                    color: palette.secondary,
                     lighting: 0.84
                 )
             case InteractableKind_EmplacedWeapon:
@@ -1389,34 +1394,34 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x, ground + 0.28, positionXZ.y),
                     size: SIMD3<Float>(width * 0.72, 0.18, depth * 0.75),
-                    color: SIMD4<Float>(baseColor.x, baseColor.y, baseColor.z, 0.99)
+                    color: palette.primary
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x + width * 0.22, ground + 0.42, positionXZ.y),
                     size: SIMD3<Float>(width * 0.44, 0.06, 0.42),
-                    color: SIMD4<Float>(0.16, 0.16, 0.16, 0.98),
+                    color: palette.secondary,
                     lighting: 0.9
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - width * 0.14, ground + 0.46, positionXZ.y),
                     size: SIMD3<Float>(width * 0.18, 0.26, depth * 0.96),
-                    color: SIMD4<Float>(0.28, 0.22, 0.18, 0.96),
+                    color: palette.accent,
                     lighting: 0.86
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - width * 0.08, ground + 0.18, positionXZ.y - depth * 0.28),
                     size: SIMD3<Float>(0.04, 0.36, 0.04),
-                    color: SIMD4<Float>(0.22, 0.22, 0.22, 0.94),
+                    color: palette.secondary,
                     lighting: 0.82
                 )
                 appendWorldBox(
                     to: &instances,
                     position: SIMD3<Float>(positionXZ.x - width * 0.08, ground + 0.18, positionXZ.y + depth * 0.28),
                     size: SIMD3<Float>(0.04, 0.36, 0.04),
-                    color: SIMD4<Float>(0.22, 0.22, 0.22, 0.94),
+                    color: palette.secondary,
                     lighting: 0.82
                 )
             default:
@@ -1437,23 +1442,24 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             let ground = terrainElevation(at: worldPosition, statePointer: statePointer)
             let positionXZ = renderWorldPosition(worldPosition)
             let yaw = sinf(item.position.x * 0.014 + item.position.y * 0.01) * 0.8
+            let pickupColor = fieldItemColor(item)
 
             switch item.kind {
             case ItemKind_BulletBox:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.08, positionXZ.y), size: SIMD3<Float>(0.2, 0.16, 0.12), color: ammoColor(item.ammoType))
+                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.08, positionXZ.y), size: SIMD3<Float>(0.2, 0.16, 0.12), color: pickupColor)
             case ItemKind_Magazine:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.14, positionXZ.y), size: SIMD3<Float>(0.08, 0.28, 0.12), color: SIMD4<Float>(0.93, 0.53, 0.18, 0.98), yaw: yaw)
+                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.14, positionXZ.y), size: SIMD3<Float>(0.08, 0.28, 0.12), color: pickupColor, yaw: yaw)
             case ItemKind_Gun:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.06, positionXZ.y), size: SIMD3<Float>(0.36, 0.08, 0.14), color: SIMD4<Float>(0.36, 0.82, 0.86, 0.98), yaw: yaw)
+                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.06, positionXZ.y), size: SIMD3<Float>(0.36, 0.08, 0.14), color: pickupColor, yaw: yaw)
             case ItemKind_Blade:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.2, positionXZ.y), size: SIMD3<Float>(0.04, 0.4, 0.08), color: SIMD4<Float>(0.85, 0.86, 0.9, 0.98), yaw: yaw)
+                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.2, positionXZ.y), size: SIMD3<Float>(0.04, 0.4, 0.08), color: pickupColor, yaw: yaw)
             case ItemKind_Attachment:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.08, positionXZ.y), size: SIMD3<Float>(0.16, 0.14, 0.12), color: SIMD4<Float>(0.28, 0.82, 0.52, 0.98), yaw: yaw)
+                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.08, positionXZ.y), size: SIMD3<Float>(0.16, 0.14, 0.12), color: pickupColor, yaw: yaw)
             case ItemKind_Medkit:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.1, positionXZ.y), size: SIMD3<Float>(0.18, 0.18, 0.18), color: SIMD4<Float>(0.92, 0.24, 0.18, 0.98))
+                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.1, positionXZ.y), size: SIMD3<Float>(0.18, 0.18, 0.18), color: pickupColor)
             case ItemKind_Objective:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.12, positionXZ.y), size: SIMD3<Float>(0.16, 0.24, 0.16), color: SIMD4<Float>(0.96, 0.88, 0.24, 0.99))
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.82, positionXZ.y), size: SIMD3<Float>(0.05, 1.05, 0.05), color: SIMD4<Float>(0.98, 0.92, 0.42, 0.94), lighting: 1.08)
+                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.12, positionXZ.y), size: SIMD3<Float>(0.16, 0.24, 0.16), color: pickupColor)
+                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.82, positionXZ.y), size: SIMD3<Float>(0.05, 1.05, 0.05), color: mixedColor(pickupColor, SIMD4<Float>(1.0, 0.94, 0.58, 0.94), amount: 0.42), lighting: 1.08)
             default:
                 break
             }
@@ -2157,11 +2163,10 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             let fade = 1.0 - min(max((distance - 8.0) / 26.0, 0.0), 1.0)
             let alpha = max(0.05, 0.16 * fade)
             let position = SIMD2<Float>(center.x, min(camera.horizon + 0.38, center.y))
-            let silhouetteColor = SIMD4<Float>(
-                worldInstance.color.x * 0.34,
-                worldInstance.color.y * 0.36,
-                worldInstance.color.z * 0.32,
-                alpha
+            let silhouetteColor = mixedColor(
+                SIMD4<Float>(worldInstance.color.x * 0.28, worldInstance.color.y * 0.3, worldInstance.color.z * 0.28, alpha),
+                SIMD4<Float>(0.28, 0.31, 0.28, alpha),
+                amount: 0.34
             )
             silhouettes.append(
                 (
@@ -2841,33 +2846,36 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                                         horizon: Float,
                                         sway: Float) {
         let terrainColor = currentTerrainTint(statePointer: statePointer, playerPosition: playerPosition)
-        let skyColor = SIMD4<Float>(0.16, 0.22, 0.28, 1)
-        let hazeColor = SIMD4<Float>(0.54, 0.58, 0.44, 0.14)
-        let groundColor = SIMD4<Float>(
-            min(terrainColor.x + 0.04, 1),
-            min(terrainColor.y + 0.02, 1),
-            min(terrainColor.z + 0.01, 1),
-            1
-        )
-        let horizonBand = SIMD4<Float>(0.42, 0.39, 0.27, 0.6)
+        let skyTop = mixedColor(SIMD4<Float>(0.07, 0.13, 0.18, 1), terrainColor, amount: 0.12)
+        let skyLow = mixedColor(SIMD4<Float>(0.21, 0.29, 0.28, 1), terrainColor, amount: 0.22)
+        let dustGlow = SIMD4<Float>(0.82, 0.68, 0.46, 0.16)
+        let hazeColor = mixedColor(SIMD4<Float>(0.56, 0.58, 0.42, 0.14), terrainColor, amount: 0.1)
+        let groundColor = mixedColor(SIMD4<Float>(0.18, 0.21, 0.16, 1), terrainColor, amount: 0.72)
+        let horizonBand = mixedColor(SIMD4<Float>(0.46, 0.39, 0.25, 0.62), terrainColor, amount: 0.08)
+        let ridgeLeft = mixedColor(SIMD4<Float>(0.24, 0.29, 0.24, 0.56), terrainColor, amount: 0.3)
+        let ridgeRight = mixedColor(SIMD4<Float>(0.22, 0.25, 0.21, 0.42), terrainColor, amount: 0.26)
 
-        instances.append(makeInstance(position: SIMD2<Float>(0, -0.66), size: SIMD2<Float>(2.6, 1.25), color: skyColor, rotation: 0, shape: .rectangle))
-        instances.append(makeInstance(position: SIMD2<Float>(0.22, horizon - 0.18), size: SIMD2<Float>(2.3, 0.42), color: hazeColor, rotation: 0, shape: .rectangle))
-        instances.append(makeInstance(position: SIMD2<Float>(0, horizon + 0.82), size: SIMD2<Float>(2.6, 1.42), color: groundColor, rotation: 0, shape: .rectangle))
-        instances.append(makeInstance(position: SIMD2<Float>(0, horizon + 0.02), size: SIMD2<Float>(2.2, 0.05), color: horizonBand, rotation: 0, shape: .rectangle))
-        instances.append(makeInstance(position: SIMD2<Float>(-0.72, horizon - 0.28), size: SIMD2<Float>(0.5, 0.18), color: SIMD4<Float>(0.3, 0.36, 0.29, 0.46), rotation: 0, shape: .rectangle))
-        instances.append(makeInstance(position: SIMD2<Float>(0.68, horizon - 0.24), size: SIMD2<Float>(0.76, 0.22), color: SIMD4<Float>(0.26, 0.31, 0.26, 0.38), rotation: 0, shape: .rectangle))
+        instances.append(makeInstance(position: SIMD2<Float>(0, -0.84), size: SIMD2<Float>(2.8, 0.82), color: skyTop, rotation: 0, shape: .rectangle))
+        instances.append(makeInstance(position: SIMD2<Float>(0, -0.34), size: SIMD2<Float>(2.8, 0.72), color: skyLow, rotation: 0, shape: .rectangle))
+        instances.append(makeInstance(position: SIMD2<Float>(-0.48, horizon - 0.42), size: SIMD2<Float>(0.52, 0.52), color: dustGlow, rotation: 0, shape: .circle))
+        instances.append(makeInstance(position: SIMD2<Float>(0.16, horizon - 0.22), size: SIMD2<Float>(2.36, 0.46), color: hazeColor, rotation: 0, shape: .rectangle))
+        instances.append(makeInstance(position: SIMD2<Float>(0.02, horizon + 0.82), size: SIMD2<Float>(2.8, 1.42), color: groundColor, rotation: 0, shape: .rectangle))
+        instances.append(makeInstance(position: SIMD2<Float>(0, horizon + 0.02), size: SIMD2<Float>(2.28, 0.06), color: horizonBand, rotation: 0, shape: .rectangle))
+        instances.append(makeInstance(position: SIMD2<Float>(-0.74, horizon - 0.29), size: SIMD2<Float>(0.58, 0.2), color: ridgeLeft, rotation: 0, shape: .rectangle))
+        instances.append(makeInstance(position: SIMD2<Float>(0.7, horizon - 0.23), size: SIMD2<Float>(0.82, 0.24), color: ridgeRight, rotation: 0, shape: .rectangle))
+        instances.append(makeInstance(position: SIMD2<Float>(-0.18, horizon - 0.54), size: SIMD2<Float>(0.44, 0.08), color: SIMD4<Float>(0.7, 0.72, 0.7, 0.08), rotation: -0.04, shape: .rectangle))
+        instances.append(makeInstance(position: SIMD2<Float>(0.42, horizon - 0.48), size: SIMD2<Float>(0.58, 0.07), color: SIMD4<Float>(0.76, 0.76, 0.72, 0.06), rotation: 0.03, shape: .rectangle))
 
         let floorBands: [Float] = [0.18, 0.3, 0.44, 0.6, 0.78, 0.98]
         for (index, bandY) in floorBands.enumerated() {
-            let alpha = max(0.08, 0.24 - Float(index) * 0.022)
+            let alpha = max(0.08, 0.25 - Float(index) * 0.024)
             let width = 2.1 - Float(index) * 0.1
             let height = 0.018 + Float(index) * 0.006
             instances.append(
                 makeInstance(
                     position: SIMD2<Float>(sway * 0.35, horizon + bandY),
                     size: SIMD2<Float>(width, height),
-                    color: SIMD4<Float>(0.08, 0.1, 0.08, alpha),
+                    color: mixedColor(SIMD4<Float>(0.07, 0.09, 0.08, alpha), terrainColor, amount: 0.18),
                     rotation: 0,
                     shape: .rectangle
                 )
@@ -3610,10 +3618,14 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         return World3DUniforms(
             viewProjectionMatrix: projection * view,
             cameraPosition: camera.position,
-            fogStart: 8.0,
-            lightDirection: simd_normalize(SIMD3<Float>(-0.42, -0.9, 0.28)),
-            fogEnd: 34.0,
-            fogColor: SIMD4<Float>(0.18, 0.22, 0.26, 1.0)
+            fogStart: 6.8,
+            lightDirection: simd_normalize(SIMD3<Float>(-0.54, -0.76, 0.32)),
+            fogEnd: 29.5,
+            fogColor: SIMD4<Float>(0.34, 0.38, 0.34, 1.0),
+            sunColor: SIMD4<Float>(1.0, 0.84, 0.66, 1.0),
+            ambientColor: SIMD4<Float>(0.4, 0.44, 0.4, 1.0),
+            shadowColor: SIMD4<Float>(0.11, 0.13, 0.14, 1.0),
+            hazeColor: SIMD4<Float>(0.76, 0.66, 0.5, 1.0)
         )
     }
 
@@ -3783,6 +3795,16 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         RenderInstance(position: position, size: size, color: color, rotation: rotation, shape: shape.rawValue)
     }
 
+    private func mixedColor(_ base: SIMD4<Float>, _ tint: SIMD4<Float>, amount: Float) -> SIMD4<Float> {
+        let t = min(max(amount, 0.0), 1.0)
+        return SIMD4<Float>(
+            base.x + (tint.x - base.x) * t,
+            base.y + (tint.y - base.y) * t,
+            base.z + (tint.z - base.z) * t,
+            base.w + (tint.w - base.w) * t
+        )
+    }
+
     private func ammoColor(_ ammoType: AmmoType) -> SIMD4<Float> {
         switch ammoType {
         case AmmoType_556:
@@ -3794,20 +3816,73 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    private func structurePalette(for kind: StructureKind) -> (primary: SIMD4<Float>, secondary: SIMD4<Float>, accent: SIMD4<Float>) {
+        switch kind {
+        case StructureKind_Ridge:
+            return (
+                SIMD4<Float>(0.39, 0.29, 0.19, 0.98),
+                SIMD4<Float>(0.58, 0.46, 0.3, 0.94),
+                SIMD4<Float>(0.23, 0.18, 0.15, 0.94)
+            )
+        case StructureKind_Road:
+            return (
+                SIMD4<Float>(0.21, 0.22, 0.22, 1.0),
+                SIMD4<Float>(0.74, 0.69, 0.45, 0.9),
+                SIMD4<Float>(0.12, 0.13, 0.14, 0.94)
+            )
+        case StructureKind_TreeCluster:
+            return (
+                SIMD4<Float>(0.32, 0.22, 0.14, 0.98),
+                SIMD4<Float>(0.23, 0.42, 0.22, 0.96),
+                SIMD4<Float>(0.12, 0.25, 0.15, 0.96)
+            )
+        case StructureKind_Building:
+            return (
+                SIMD4<Float>(0.58, 0.52, 0.42, 0.99),
+                SIMD4<Float>(0.24, 0.29, 0.27, 0.98),
+                SIMD4<Float>(0.15, 0.19, 0.2, 0.94)
+            )
+        case StructureKind_LowWall:
+            return (
+                SIMD4<Float>(0.74, 0.69, 0.57, 0.99),
+                SIMD4<Float>(0.88, 0.82, 0.69, 0.96),
+                SIMD4<Float>(0.59, 0.56, 0.45, 0.94)
+            )
+        case StructureKind_Tower:
+            return (
+                SIMD4<Float>(0.53, 0.48, 0.37, 0.98),
+                SIMD4<Float>(0.25, 0.28, 0.24, 0.98),
+                SIMD4<Float>(0.35, 0.31, 0.24, 0.94)
+            )
+        case StructureKind_Convoy:
+            return (
+                SIMD4<Float>(0.28, 0.34, 0.29, 0.99),
+                SIMD4<Float>(0.14, 0.17, 0.17, 0.98),
+                SIMD4<Float>(0.34, 0.41, 0.43, 0.82)
+            )
+        default:
+            return (
+                SIMD4<Float>(0.56, 0.56, 0.52, 0.98),
+                SIMD4<Float>(0.24, 0.26, 0.26, 0.94),
+                SIMD4<Float>(0.16, 0.18, 0.18, 0.92)
+            )
+        }
+    }
+
     private func terrainColor(_ material: TerrainMaterial) -> SIMD4<Float> {
         switch material {
         case TerrainMaterial_Road:
-            return SIMD4<Float>(0.26, 0.27, 0.25, 0.96)
+            return SIMD4<Float>(0.24, 0.24, 0.22, 0.96)
         case TerrainMaterial_Mud:
-            return SIMD4<Float>(0.34, 0.22, 0.16, 0.96)
+            return SIMD4<Float>(0.31, 0.2, 0.15, 0.96)
         case TerrainMaterial_Rock:
-            return SIMD4<Float>(0.41, 0.37, 0.28, 0.96)
+            return SIMD4<Float>(0.47, 0.41, 0.32, 0.96)
         case TerrainMaterial_Compound:
-            return SIMD4<Float>(0.48, 0.43, 0.34, 0.94)
+            return SIMD4<Float>(0.53, 0.47, 0.36, 0.94)
         case TerrainMaterial_Forest:
-            return SIMD4<Float>(0.12, 0.28, 0.14, 0.96)
+            return SIMD4<Float>(0.16, 0.27, 0.16, 0.96)
         default:
-            return SIMD4<Float>(0.18, 0.27, 0.15, 0.96)
+            return SIMD4<Float>(0.22, 0.31, 0.18, 0.96)
         }
     }
 
@@ -3815,38 +3890,38 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         let heightTint = min(max(height / 72.0, -0.08), 0.12)
         switch material {
         case TerrainMaterial_Road:
-            return SIMD4<Float>(0.34 + heightTint, 0.35 + heightTint * 0.8, 0.33 + variation * 0.04, 0.94)
+            return SIMD4<Float>(0.34 + heightTint, 0.33 + heightTint * 0.7, 0.3 + variation * 0.04, 0.94)
         case TerrainMaterial_Mud:
-            return SIMD4<Float>(0.46 + variation * 0.04, 0.28 + heightTint * 0.5, 0.2 + variation * 0.03, 0.94)
+            return SIMD4<Float>(0.42 + variation * 0.04, 0.26 + heightTint * 0.5, 0.18 + variation * 0.03, 0.94)
         case TerrainMaterial_Rock:
-            return SIMD4<Float>(0.5 + variation * 0.06, 0.46 + heightTint * 0.8, 0.38 + variation * 0.04, 0.95)
+            return SIMD4<Float>(0.54 + variation * 0.06, 0.48 + heightTint * 0.8, 0.38 + variation * 0.04, 0.95)
         case TerrainMaterial_Compound:
-            return SIMD4<Float>(0.58 + heightTint * 0.6, 0.54 + variation * 0.04, 0.44 + variation * 0.03, 0.94)
+            return SIMD4<Float>(0.62 + heightTint * 0.6, 0.55 + variation * 0.04, 0.43 + variation * 0.03, 0.94)
         case TerrainMaterial_Forest:
-            return SIMD4<Float>(0.18 + variation * 0.03, 0.34 + heightTint * 0.6, 0.17 + variation * 0.02, 0.94)
+            return SIMD4<Float>(0.2 + variation * 0.03, 0.33 + heightTint * 0.6, 0.18 + variation * 0.02, 0.94)
         default:
-            return SIMD4<Float>(0.26 + variation * 0.04, 0.36 + heightTint * 0.7, 0.2 + variation * 0.03, 0.94)
+            return SIMD4<Float>(0.28 + variation * 0.04, 0.38 + heightTint * 0.7, 0.22 + variation * 0.03, 0.94)
         }
     }
 
     private func terrainSkylineColor(_ material: TerrainMaterial, distance: Float, height: Float) -> SIMD4<Float> {
         let fade = 1.0 - min(max((distance - 9.0) / 31.0, 0.0), 1.0)
-        let alpha = max(0.05, 0.16 * fade)
+        let alpha = max(0.05, 0.18 * fade)
         let heightTint = min(max(height / 88.0, -0.04), 0.08)
 
         switch material {
         case TerrainMaterial_Rock:
-            return SIMD4<Float>(0.24 + heightTint, 0.26 + heightTint, 0.24, alpha)
+            return SIMD4<Float>(0.29 + heightTint, 0.3 + heightTint, 0.28, alpha)
         case TerrainMaterial_Forest:
-            return SIMD4<Float>(0.18, 0.28 + heightTint, 0.18, alpha * 1.08)
+            return SIMD4<Float>(0.2, 0.3 + heightTint, 0.2, alpha * 1.08)
         case TerrainMaterial_Compound:
-            return SIMD4<Float>(0.28 + heightTint, 0.28 + heightTint * 0.8, 0.24, alpha)
+            return SIMD4<Float>(0.34 + heightTint, 0.33 + heightTint * 0.8, 0.28, alpha)
         case TerrainMaterial_Road:
-            return SIMD4<Float>(0.2, 0.22, 0.22, alpha * 0.9)
+            return SIMD4<Float>(0.22, 0.24, 0.24, alpha * 0.9)
         case TerrainMaterial_Mud:
-            return SIMD4<Float>(0.22, 0.18, 0.16, alpha * 0.92)
+            return SIMD4<Float>(0.25, 0.2, 0.18, alpha * 0.92)
         default:
-            return SIMD4<Float>(0.2, 0.26 + heightTint, 0.19, alpha)
+            return SIMD4<Float>(0.23, 0.29 + heightTint, 0.21, alpha)
         }
     }
 
@@ -3855,22 +3930,73 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         return min(max((noise + 2.0) * 0.25, 0.0), 1.0)
     }
 
-    private func interactableColor(kind: InteractableKind, toggled: Bool, singleUse: Bool) -> SIMD4<Float> {
+    private func interactablePalette(kind: InteractableKind,
+                                     toggled: Bool,
+                                     singleUse: Bool) -> (primary: SIMD4<Float>, secondary: SIMD4<Float>, accent: SIMD4<Float>) {
         let spentFade: Float = (singleUse && toggled) ? 0.45 : 1.0
 
         switch kind {
         case InteractableKind_Door:
-            return SIMD4<Float>(0.81, 0.74, 0.58, toggled ? 0.32 : 0.9)
+            return (
+                SIMD4<Float>(0.7, 0.58, 0.42, toggled ? 0.34 : 0.96),
+                SIMD4<Float>(0.3, 0.23, 0.16, 0.94),
+                SIMD4<Float>(0.18, 0.14, 0.11, 0.92)
+            )
         case InteractableKind_SupplyCrate:
-            return SIMD4<Float>(0.28, 0.58, 0.86, 0.92 * spentFade)
+            return (
+                SIMD4<Float>(0.43, 0.54, 0.45, 0.92 * spentFade),
+                SIMD4<Float>(0.78, 0.79, 0.74, 0.94 * spentFade),
+                SIMD4<Float>(0.21, 0.24, 0.2, 0.92 * spentFade)
+            )
         case InteractableKind_DeadDrop:
-            return SIMD4<Float>(0.92, 0.72, 0.24, 0.92 * spentFade)
+            return (
+                SIMD4<Float>(0.54, 0.41, 0.22, 0.92 * spentFade),
+                SIMD4<Float>(0.24, 0.19, 0.15, 0.9 * spentFade),
+                SIMD4<Float>(0.16, 0.13, 0.1, 0.88 * spentFade)
+            )
         case InteractableKind_Radio:
-            return SIMD4<Float>(0.34, 0.82, 0.46, 0.92 * spentFade)
+            return (
+                SIMD4<Float>(0.42, 0.62, 0.46, 0.92 * spentFade),
+                SIMD4<Float>(0.74, 0.78, 0.74, 0.94 * spentFade),
+                SIMD4<Float>(0.18, 0.21, 0.18, 0.92 * spentFade)
+            )
         case InteractableKind_EmplacedWeapon:
-            return SIMD4<Float>(0.76, 0.28, 0.22, 0.9)
+            return (
+                SIMD4<Float>(0.42, 0.29, 0.22, 0.9),
+                SIMD4<Float>(0.16, 0.17, 0.17, 0.96),
+                SIMD4<Float>(0.28, 0.24, 0.19, 0.94)
+            )
         default:
-            return SIMD4<Float>(0.8, 0.8, 0.8, 0.8)
+            return (
+                SIMD4<Float>(0.64, 0.64, 0.62, 0.84),
+                SIMD4<Float>(0.28, 0.28, 0.28, 0.88),
+                SIMD4<Float>(0.18, 0.18, 0.18, 0.86)
+            )
+        }
+    }
+
+    private func interactableColor(kind: InteractableKind, toggled: Bool, singleUse: Bool) -> SIMD4<Float> {
+        interactablePalette(kind: kind, toggled: toggled, singleUse: singleUse).primary
+    }
+
+    private func fieldItemColor(_ item: WorldItem) -> SIMD4<Float> {
+        switch item.kind {
+        case ItemKind_BulletBox:
+            return mixedColor(ammoColor(item.ammoType), SIMD4<Float>(0.46, 0.34, 0.18, 0.98), amount: 0.34)
+        case ItemKind_Magazine:
+            return SIMD4<Float>(0.42, 0.25, 0.16, 0.98)
+        case ItemKind_Gun:
+            return SIMD4<Float>(0.32, 0.36, 0.35, 0.98)
+        case ItemKind_Blade:
+            return SIMD4<Float>(0.74, 0.78, 0.8, 0.98)
+        case ItemKind_Attachment:
+            return SIMD4<Float>(0.3, 0.46, 0.32, 0.98)
+        case ItemKind_Medkit:
+            return SIMD4<Float>(0.72, 0.18, 0.14, 0.98)
+        case ItemKind_Objective:
+            return SIMD4<Float>(0.86, 0.76, 0.28, 0.99)
+        default:
+            return SIMD4<Float>(0.52, 0.56, 0.52, 0.96)
         }
     }
 }

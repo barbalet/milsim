@@ -7,7 +7,99 @@
       "initialEvent": "Raven Actual: ridge infil is live. Cut the gate, recover both packages, and stay light.",
       "quietReport": "Raven net quiet. Recover the relay to build a hostile picture.",
       "clearReport": "Raven net clear. No active patrol traffic remains on this objective.",
-      "interceptCallsign": "Raven"
+      "interceptCallsign": "Raven",
+      "phases": [
+        {
+          "id": "approach",
+          "title": "Ridge Infiltration",
+          "brief": "Raven wants a clean north breach. Stay light, pull the first package, and touch the relay before the ridge search net wakes up.",
+          "objective": "Breach the north gate, recover the cache package, then tap the relay to open the east exfil picture.",
+          "event": "Raven Actual: keep the ridge quiet until the relay is in hand.",
+          "routeSummary": "Command route favors the north ridge cut and the relay pocket before the east peel.",
+          "interactionHint": "The relay is the hinge point for the cleaner exfil lane.",
+          "condition": {
+            "objectiveCountAtMost": 0,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "intel_live",
+          "title": "Relay Copied",
+          "objective": "Intel is live. Recover the remaining package and stage for the east extraction lane.",
+          "event": "Raven Actual: relay copied. Use the traffic picture to finish the strip.",
+          "radio": "Raven relay copied. Patrol traffic is now feeding across the tactical map.",
+          "intelStatus": "Radio intel live. Raven is pushing patrol movement and exfil pressure onto the tactical board.",
+          "routeSummary": "Route refreshed. The east peel now tracks active search movement around the ridge road.",
+          "interactionHint": "Use the live route to avoid the reforming patrol screen.",
+          "condition": {
+            "radioIntelUnlocked": true,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "exfil",
+          "title": "Cache Stripped",
+          "objective": "Packages secured. Break contact and move east to the extraction point.",
+          "event": "Raven Actual: cache stripped. Peel east before the ridge net rebuilds.",
+          "routeSummary": "Command route is now pure exfil. East is the cleanest remaining lane.",
+          "condition": {
+            "objectiveTargetReached": true,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "complete",
+          "title": "Operation Complete",
+          "objective": "Cache stripped and archived. Review the branch result before rolling to the next op.",
+          "event": "Raven Actual: good extract. The ridge cache is off the board.",
+          "condition": {
+            "victory": true
+          }
+        },
+        {
+          "id": "failure",
+          "title": "Operation Lost",
+          "objective": "Ridge infil collapsed before extraction. Review the archive branch and reinsert.",
+          "event": "Raven Actual: operator lost on the ridge.",
+          "condition": {
+            "failed": true
+          }
+        }
+      ],
+      "branches": [
+        {
+          "id": "ghosted_intercept",
+          "title": "Ghosted Intercept",
+          "summary": "Relay copied and the raid stayed mostly clean. Command flags this as Raven's preferred stealth archive.",
+          "campaignResult": "Ghosted intercept archived for Raven on the ridge cache raid.",
+          "condition": {
+            "victory": true,
+            "intelRecovered": true,
+            "killsAtMost": 4
+          }
+        },
+        {
+          "id": "shock_assault",
+          "title": "Shock Assault",
+          "summary": "The packages came out, but the ridge had to be taken by force. Command archives the raid as a loud success.",
+          "campaignResult": "Shock assault archived for Raven after a loud cache strip.",
+          "condition": {
+            "victory": true
+          }
+        },
+        {
+          "id": "broken_infiltration",
+          "title": "Broken Infiltration",
+          "summary": "The ridge raid collapsed before exfil. Reinsert with tighter timing around the relay and package sweep.",
+          "campaignResult": "Broken infiltration report filed for Raven after the cache raid failed.",
+          "condition": {
+            "failed": true
+          }
+        }
+      ]
     },
     {
       "mission": "hostage_recovery",
@@ -16,7 +108,98 @@
       "initialEvent": "Viper Actual: move block to block, breach the safehouse, then drag the route south.",
       "quietReport": "Viper net dark. Tap the street relay to expose the safehouse screen.",
       "clearReport": "Viper net clear. The village search net has gone cold.",
-      "interceptCallsign": "Viper"
+      "interceptCallsign": "Viper",
+      "phases": [
+        {
+          "id": "block_clearance",
+          "title": "Village Push",
+          "brief": "Viper wants the outer blocks cleaned methodically. Open the street relay before you commit to the safehouse.",
+          "objective": "Sweep into the blocks, breach the relay site, and build enough picture to hit the safehouse clean.",
+          "event": "Viper Actual: work block to block and do not rush the south road.",
+          "routeSummary": "Command route staggers through the relay intersection before turning into the hostage block.",
+          "interactionHint": "The street relay gives you the cleanest read on the safehouse screen.",
+          "condition": {
+            "objectiveCountAtMost": 0,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "screen_exposed",
+          "title": "Safehouse Screen Exposed",
+          "objective": "Street relay copied. Breach the safehouse, pull the beacon, and set the south road for extraction.",
+          "event": "Viper Actual: the village net is exposed. Move on the safehouse now.",
+          "radio": "Viper copied the street relay. South-road blockers and village movers are now tagged.",
+          "intelStatus": "Radio intel live. The village screen is now visible and the south road is updating in real time.",
+          "routeSummary": "Route refreshed. The south road peel now updates off the street relay intercept.",
+          "condition": {
+            "radioIntelUnlocked": true,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "south_pull",
+          "title": "South Road Pull",
+          "objective": "Beacon secured. Break contact through the south road and extract before the blocks refill.",
+          "event": "Viper Actual: beacon is secure. Drag the route south and leave the blocks behind.",
+          "routeSummary": "Command route is now south-road only. The village interior is expendable once you hit extraction.",
+          "condition": {
+            "objectiveTargetReached": true,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "complete",
+          "title": "Hostage Package Out",
+          "objective": "Beacon recovered and route cleared. Review the branch archive before the next operation.",
+          "event": "Viper Actual: package is out. Good work on the village pull.",
+          "condition": {
+            "victory": true
+          }
+        },
+        {
+          "id": "failure",
+          "title": "Village Collapse",
+          "objective": "The safehouse run failed before extraction. Rebuild the route and try the blocks again.",
+          "event": "Viper Actual: operator lost in the village.",
+          "condition": {
+            "failed": true
+          }
+        }
+      ],
+      "branches": [
+        {
+          "id": "surgical_pull",
+          "title": "Surgical Pull",
+          "summary": "The relay and beacon came out with limited noise. Command marks this as Viper's clean hostage recovery branch.",
+          "campaignResult": "Surgical pull archived for Viper after a clean village recovery.",
+          "condition": {
+            "victory": true,
+            "intelRecovered": true,
+            "killsAtMost": 5
+          }
+        },
+        {
+          "id": "hard_breach",
+          "title": "Hard Breach",
+          "summary": "The safehouse had to be torn open under pressure, but the package still came out. Command logs a hard-breach success.",
+          "campaignResult": "Hard breach archived for Viper after forcing the village recovery.",
+          "condition": {
+            "victory": true
+          }
+        },
+        {
+          "id": "street_loss",
+          "title": "Street Loss",
+          "summary": "The village recovery failed before the route could be opened. Expect a tougher screen next reinsert.",
+          "campaignResult": "Street loss filed for Viper after the hostage recovery failed.",
+          "condition": {
+            "failed": true
+          }
+        }
+      ]
     },
     {
       "mission": "recon_exfil",
@@ -25,7 +208,98 @@
       "initialEvent": "Ghost Lead: stay quiet, fill the map, lift both packages, then fade to the north tree line.",
       "quietReport": "Ghost net quiet. Recover a receiver to surface the patrol pattern.",
       "clearReport": "Ghost net clear. No active search teams are transmitting.",
-      "interceptCallsign": "Ghost"
+      "interceptCallsign": "Ghost",
+      "phases": [
+        {
+          "id": "silent_probe",
+          "title": "Silent Probe",
+          "brief": "Ghost wants the route mapped before contact. Touch the shack receiver, recover the ridge package, and keep the treeline quiet.",
+          "objective": "Stay hidden through the treeline, copy the shack receiver, and build enough picture to slip north.",
+          "event": "Ghost Lead: fill the map first and do not advertise the route.",
+          "routeSummary": "Command route snakes through treeline pockets and the shack receiver before the ridge package.",
+          "interactionHint": "The shack receiver is the safest way to turn patrol drift into a usable map.",
+          "condition": {
+            "objectiveCountAtMost": 0,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "pattern_exposed",
+          "title": "Patrol Pattern Exposed",
+          "objective": "Receiver copied. Lift the remaining package and ghost north before the search ring tightens.",
+          "event": "Ghost Lead: pattern is live. Use it to stay ahead of the patrol ring.",
+          "radio": "Ghost copied the shack receiver. Patrol arcs are now painting across the map.",
+          "intelStatus": "Radio intel live. Ghost now has a moving patrol pattern and a clearer north peel.",
+          "routeSummary": "Route refreshed. The north exfil lane now avoids the thickest moving patrol arcs.",
+          "condition": {
+            "radioIntelUnlocked": true,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "north_fade",
+          "title": "North Fade",
+          "objective": "Packages secured. Break north through the tree line and do not get fixed on the ridge.",
+          "event": "Ghost Lead: packages are up. Fade north and keep the net guessing.",
+          "routeSummary": "Command route is now a northbound fade through treeline cover and off-map extraction.",
+          "condition": {
+            "objectiveTargetReached": true,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "complete",
+          "title": "Recon Archived",
+          "objective": "Receiver and packages recovered. Review the archive branch and set up the next reconnaissance pass.",
+          "event": "Ghost Lead: recon packet complete. Good north fade.",
+          "condition": {
+            "victory": true
+          }
+        },
+        {
+          "id": "failure",
+          "title": "Recon Burned",
+          "objective": "The reconnaissance run burned before extraction. Reset the treeline approach and try again.",
+          "event": "Ghost Lead: operator lost before the north fade.",
+          "condition": {
+            "failed": true
+          }
+        }
+      ],
+      "branches": [
+        {
+          "id": "cold_shadow",
+          "title": "Cold Shadow",
+          "summary": "Ghost copied the patrol picture and stayed mostly unseen. Command logs a model reconnaissance branch.",
+          "campaignResult": "Cold shadow archived for Ghost after a low-signature recon pass.",
+          "condition": {
+            "victory": true,
+            "intelRecovered": true,
+            "killsAtMost": 2
+          }
+        },
+        {
+          "id": "running_break",
+          "title": "Running Break",
+          "summary": "The patrol picture came out, but the team had to fight for the fade. Command marks a contested recon success.",
+          "campaignResult": "Running break archived for Ghost after a contested north fade.",
+          "condition": {
+            "victory": true
+          }
+        },
+        {
+          "id": "burned_route",
+          "title": "Burned Route",
+          "summary": "The reconnaissance line collapsed before extraction. Expect the next probe to meet a hotter patrol ring.",
+          "campaignResult": "Burned route filed for Ghost after the recon operation failed.",
+          "condition": {
+            "failed": true
+          }
+        }
+      ]
     },
     {
       "mission": "convoy_ambush",
@@ -34,7 +308,98 @@
       "initialEvent": "Jackal Actual: break the road column, seize the cargo, then disappear through the west trees.",
       "quietReport": "Jackal net quiet. Recover the convoy radio to track fallback movement.",
       "clearReport": "Jackal net clear. Convoy survivors are off the air.",
-      "interceptCallsign": "Jackal"
+      "interceptCallsign": "Jackal",
+      "phases": [
+        {
+          "id": "road_break",
+          "title": "Road Break",
+          "brief": "Jackal wants the convoy snapped fast, then the fallback cache stripped before reinforcements settle the road again.",
+          "objective": "Break the column, recover the convoy radio, and use the intercept to shape the fallback cache raid.",
+          "event": "Jackal Actual: break the road first, then roll the west tree line.",
+          "routeSummary": "Command route hits the road break, then folds west toward the fallback cache and extraction lane.",
+          "interactionHint": "The convoy radio is the key to the cleaner fallback cache route.",
+          "condition": {
+            "objectiveCountAtMost": 0,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "fallback_tracked",
+          "title": "Fallback Tracked",
+          "objective": "Convoy radio copied. Strip the fallback cache and peel west before the survivors regroup.",
+          "event": "Jackal Actual: intercept is live. Finish the cache before the road survivors collapse west.",
+          "radio": "Jackal copied the convoy radio. Fallback movement is now visible across the route board.",
+          "intelStatus": "Radio intel live. Convoy fallback movement is feeding onto the tactical map.",
+          "routeSummary": "Route refreshed. The west peel now tracks fallback traffic around the convoy kill zone.",
+          "condition": {
+            "radioIntelUnlocked": true,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "west_peel",
+          "title": "West Peel",
+          "objective": "Manifest and tablet secured. Strip out to the west extraction lane before the road hardens.",
+          "event": "Jackal Actual: cargo is secured. Peel west and do not linger on the road.",
+          "routeSummary": "Command route is now a westbound peel through the convoy debris and tree line.",
+          "condition": {
+            "objectiveTargetReached": true,
+            "victory": false,
+            "failed": false
+          }
+        },
+        {
+          "id": "complete",
+          "title": "Ambush Complete",
+          "objective": "Convoy broken and cargo archived. Review the branch result before rolling the next operation.",
+          "event": "Jackal Actual: convoy is broken and the cargo is ours.",
+          "condition": {
+            "victory": true
+          }
+        },
+        {
+          "id": "failure",
+          "title": "Ambush Failed",
+          "objective": "The road ambush collapsed before extraction. Reset the break point and try the convoy again.",
+          "event": "Jackal Actual: operator lost before the west peel.",
+          "condition": {
+            "failed": true
+          }
+        }
+      ],
+      "branches": [
+        {
+          "id": "clean_cut",
+          "title": "Clean Cut",
+          "summary": "The convoy radio came out and the west peel stayed tight. Command archives a disciplined ambush branch.",
+          "campaignResult": "Clean cut archived for Jackal after a disciplined convoy ambush.",
+          "condition": {
+            "victory": true,
+            "intelRecovered": true,
+            "killsAtMost": 6
+          }
+        },
+        {
+          "id": "rolling_wreck",
+          "title": "Rolling Wreck",
+          "summary": "The convoy was smashed and stripped under heavy pressure. Command still logs a successful cargo seizure.",
+          "campaignResult": "Rolling wreck archived for Jackal after a heavy convoy ambush.",
+          "condition": {
+            "victory": true
+          }
+        },
+        {
+          "id": "road_loss",
+          "title": "Road Loss",
+          "summary": "The ambush failed before the west peel could settle. Expect a sharper convoy response next insertion.",
+          "campaignResult": "Road loss filed for Jackal after the convoy ambush failed.",
+          "condition": {
+            "failed": true
+          }
+        }
+      ]
     }
   ]
 }

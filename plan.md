@@ -115,6 +115,18 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Added first-pass reload choreography for firearms with tilted receiver motion, magazine extraction/insertion staging, and support-hand movement timed off live weapon state so reloads finally feel like an action instead of a cooldown number.
 - Reworked first-person recoil and melee presentation into spring-driven motion with slash trails, stronger knife swings, and more physical recovery on kick, drift, and roll so close-quarters handling feels more grounded and readable in motion.
 
+### Authored Art-Direction Pass Added
+
+- Reworked the Metal first-person lighting model around warmer sun, cooler shadow, and thicker atmospheric haze values so the battlefield reads less like flat debug lighting and more like a deliberate outdoor mood.
+- Unified backdrop, skyline, terrain, structures, vehicles, interactables, and pickups around a dust-and-olive field palette so terrain, architecture, props, and collectible gear now belong to the same visual language.
+- Tuned world materials toward more grounded military colors while preserving gameplay readability through contrast, silhouette breakup, and retained highlight accents for critical pickups and objective objects.
+
+### Branching Mission Scripting and Campaign Slots Added
+
+- Expanded the bundled mission-script data model to support authored objective phases, route/intel callout overrides, and resolved branch outcomes per mission so each operation can present a clearer arc without rewriting the core C simulation.
+- Layered phase and branch evaluation over live mission state in SwiftUI so the mission panel, tactical map copy, and campaign archive now react to intel capture, objective progress, extraction readiness, and final mission outcome.
+- Replaced the single campaign archive with Alpha, Bravo, and Charlie save slots exposed in the HUD and menu bar so parallel campaign runs, replays, and mission-state comparisons are possible without overwriting one another.
+
 ## Cycle 0: Foundation and Playable Slice
 
 - Deliver a bootable macOS app with SwiftUI shell, Metal renderer, and C engine.
@@ -217,6 +229,6 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Start the first authored art-direction pass for terrain, structures, props, fog, and lighting so the improved 3D composition begins converging on a coherent visual language instead of just more detailed primitives.
-- Expand mission scripting into branching triggers, authored objective phases, and richer campaign slots once the presentation layer feels stable enough to showcase them.
 - Start the first Cycle 4 command-layer pass with friendly AI teammates or lightweight fireteam orders after the combat/readability passes stop moving core rendering assumptions.
+- Carry the new visual direction into authored meshes, decals, impact materials, and eventually audio so the scene polish keeps compounding instead of stalling at palette, fog, and scripted mission copy.
+- Deepen the new campaign shell with slot metadata migration, longer branching chains, and debrief rewards once the first command-layer pass settles the broader mission structure.

@@ -42,6 +42,10 @@ struct World3DUniforms {
     float3 lightDirection;
     float fogEnd;
     float4 fogColor;
+    float4 sunColor;
+    float4 ambientColor;
+    float4 shadowColor;
+    float4 hazeColor;
 };
 
 struct World3DRasterizerData {
@@ -49,6 +53,8 @@ struct World3DRasterizerData {
     float3 normal;
     float4 color;
     float fogAmount;
+    float3 worldPosition;
+    float viewFacing;
 };
 
 vertex RasterizerData instancedVertex(uint vertexID [[vertex_id]],
@@ -117,20 +123,33 @@ vertex World3DRasterizerData firstPersonWorldVertex(uint vertexID [[vertex_id]],
         cubeVertex.normal.x * sy + cubeVertex.normal.z * cy
     ));
 
-    float diffuse = max(dot(rotatedNormal, normalize(-uniforms.lightDirection)), 0.0);
-    float shading = (0.34 + diffuse * 0.66) * instance.lighting;
-    float edgeTint = 0.92 + rotatedNormal.y * 0.08;
     float distanceToCamera = distance(worldPosition, uniforms.cameraPosition);
+    float3 viewDirection = normalize(uniforms.cameraPosition - worldPosition);
 
     out.position = uniforms.viewProjectionMatrix * float4(worldPosition, 1.0);
     out.normal = rotatedNormal;
-    out.color = float4(instance.color.rgb * shading * edgeTint, instance.color.a);
+    out.color = float4(instance.color.rgb * instance.lighting, instance.color.a);
     out.fogAmount = smoothstep(uniforms.fogStart, uniforms.fogEnd, distanceToCamera);
+    out.worldPosition = worldPosition;
+    out.viewFacing = clamp(dot(rotatedNormal, viewDirection), 0.0, 1.0);
     return out;
 }
 
 fragment float4 firstPersonWorldFragment(World3DRasterizerData in [[stage_in]],
                                          constant World3DUniforms &uniforms [[buffer(0)]]) {
-    float3 foggedColor = mix(in.color.rgb, uniforms.fogColor.rgb, in.fogAmount);
+    float sunAmount = max(dot(normalize(in.normal), normalize(-uniforms.lightDirection)), 0.0);
+    float skyBounce = clamp(in.normal.y * 0.5 + 0.5, 0.0, 1.0);
+    float rim = pow(max(1.0 - in.viewFacing, 0.0), 2.0);
+    float heightHaze = smoothstep(-0.6, 2.8, in.worldPosition.y);
+
+    float3 ambient = mix(uniforms.shadowColor.rgb, uniforms.ambientColor.rgb, skyBounce);
+    float3 litColor = in.color.rgb * ambient;
+    litColor += in.color.rgb * uniforms.sunColor.rgb * (0.16 + sunAmount * 0.7);
+    litColor += uniforms.hazeColor.rgb * rim * 0.06 * (1.0 - in.fogAmount);
+    litColor = clamp(litColor, 0.0, 1.4);
+
+    float hazeMix = clamp(heightHaze * 0.35 + sunAmount * 0.12, 0.0, 1.0);
+    float3 fogTarget = mix(uniforms.fogColor.rgb, uniforms.hazeColor.rgb, hazeMix);
+    float3 foggedColor = mix(litColor, fogTarget, in.fogAmount);
     return float4(foggedColor, in.color.a);
 }

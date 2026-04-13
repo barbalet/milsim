@@ -79,6 +79,10 @@ struct MissionPanelView: View {
                 .foregroundStyle(HUDPalette.sand)
             Text(hud.missionBrief)
                 .foregroundStyle(HUDPalette.sand.opacity(0.92))
+            Text(hud.missionPhase)
+                .foregroundStyle(HUDPalette.blue.opacity(0.9))
+            Text(hud.missionBranch)
+                .foregroundStyle(HUDPalette.green.opacity(0.9))
             Text(hud.objective)
                 .foregroundStyle(HUDPalette.amber)
             Text(hud.event)
@@ -229,6 +233,52 @@ struct LoadoutPanelView: View {
                 .padding(.top, 6)
             Text(hud.saveStatus)
                 .foregroundStyle(HUDPalette.green.opacity(0.9))
+
+            Divider()
+                .overlay(HUDPalette.olive.opacity(0.85))
+                .padding(.vertical, 6)
+
+            Text("CAMPAIGN SLOTS")
+                .font(.system(size: 11, weight: .black, design: .monospaced))
+                .kerning(1.6)
+                .foregroundStyle(HUDPalette.amber)
+
+            ForEach(hud.campaignSlots) { slot in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(slot.title)
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                            .foregroundStyle(slot.isActive ? HUDPalette.amber : HUDPalette.sand)
+                        if slot.isActive {
+                            Text("ACTIVE")
+                                .font(.system(size: 10, weight: .black, design: .monospaced))
+                                .kerning(1.2)
+                                .foregroundStyle(HUDPalette.green)
+                        }
+                    }
+
+                    Text(slot.detail)
+                        .foregroundStyle(HUDPalette.sand.opacity(0.82))
+
+                    HStack(spacing: 10) {
+                        Button(slot.isActive ? "Selected" : "Use") {
+                            viewModel.setCampaignSlot(slot.id)
+                        }
+                        .disabled(slot.isActive)
+
+                        Button("Save") {
+                            viewModel.saveCampaign(to: slot.id)
+                        }
+
+                        Button("Load") {
+                            _ = viewModel.loadCampaign(from: slot.id)
+                        }
+                        .disabled(!slot.hasArchive)
+                    }
+                    .buttonStyle(HUDButtonStyle())
+                }
+                .padding(.vertical, 4)
+            }
 
             HStack(spacing: 10) {
                 Button("Save") {

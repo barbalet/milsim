@@ -131,5 +131,29 @@ private struct MilsimCommands: Commands {
                 openWindow(id: HUDPanelWindowID.loadout.rawValue)
             }
         }
+
+        CommandMenu("Campaign Slots") {
+            ForEach(CampaignSlot.allCases) { slot in
+                Button("Use \(slot.title)") {
+                    viewModel.setCampaignSlot(slot)
+                }
+            }
+
+            Divider()
+
+            ForEach(CampaignSlot.allCases) { slot in
+                Button("Save to \(slot.title)") {
+                    viewModel.saveCampaign(to: slot)
+                }
+            }
+
+            Divider()
+
+            ForEach(CampaignSlot.allCases) { slot in
+                Button("Load \(slot.title)") {
+                    _ = viewModel.loadCampaign(from: slot)
+                }
+            }
+        }
     }
 }

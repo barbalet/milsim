@@ -12,6 +12,37 @@ struct InventoryRow: Identifiable {
     let isSelected: Bool
 }
 
+enum CampaignSlot: String, CaseIterable, Codable, Identifiable {
+    case alpha
+    case bravo
+    case charlie
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .alpha:
+            return "Alpha"
+        case .bravo:
+            return "Bravo"
+        case .charlie:
+            return "Charlie"
+        }
+    }
+
+    var fileName: String {
+        "CampaignSlot\(title).json"
+    }
+}
+
+struct CampaignSlotSummary: Identifiable {
+    let id: CampaignSlot
+    let title: String
+    let detail: String
+    let isActive: Bool
+    let hasArchive: Bool
+}
+
 enum TacticalMaterial {
     case grass
     case road
@@ -58,6 +89,8 @@ struct TacticalRouteSegment: Identifiable {
 struct HUDSnapshot {
     var missionName = ""
     var missionBrief = ""
+    var missionPhase = ""
+    var missionBranch = ""
     var objective = ""
     var event = ""
     var weapon = ""
@@ -79,6 +112,7 @@ struct HUDSnapshot {
     var interactionHint = ""
     var campaignStatus = ""
     var saveStatus = ""
+    var campaignSlots: [CampaignSlotSummary] = []
     var worldHalfSize = SIMD2<Float>(1400, 980)
     var mapExpanded = true
     var mapTiles: [TacticalMapTile] = []
@@ -158,6 +192,142 @@ private struct MissionScriptRecord: Decodable {
     let quietReport: String?
     let clearReport: String?
     let interceptCallsign: String?
+    let phases: [MissionScriptPhaseRecord]?
+    let branches: [MissionScriptBranchRecord]?
+}
+
+private struct MissionScriptPhaseRecord: Decodable {
+    let id: String
+    let title: String
+    let brief: String?
+    let objective: String?
+    let event: String?
+    let radio: String?
+    let intelStatus: String?
+    let routeSummary: String?
+    let interactionHint: String?
+    let condition: MissionScriptConditionRecord?
+}
+
+private struct MissionScriptBranchRecord: Decodable {
+    let id: String
+    let title: String
+    let summary: String
+    let campaignResult: String?
+    let objective: String?
+    let event: String?
+    let routeSummary: String?
+    let condition: MissionScriptConditionRecord?
+}
+
+private struct MissionScriptConditionRecord: Decodable {
+    let objectiveCountAtLeast: Int?
+    let objectiveCountAtMost: Int?
+    let objectiveTargetReached: Bool?
+    let radioIntelUnlocked: Bool?
+    let extractionReady: Bool?
+    let victory: Bool?
+    let failed: Bool?
+    let killsAtLeast: Int?
+    let killsAtMost: Int?
+    let lootAtLeast: Int?
+    let lootAtMost: Int?
+    let intelRecovered: Bool?
+
+    init(objectiveCountAtLeast: Int? = nil,
+         objectiveCountAtMost: Int? = nil,
+         objectiveTargetReached: Bool? = nil,
+         radioIntelUnlocked: Bool? = nil,
+         extractionReady: Bool? = nil,
+         victory: Bool? = nil,
+         failed: Bool? = nil,
+         killsAtLeast: Int? = nil,
+         killsAtMost: Int? = nil,
+         lootAtLeast: Int? = nil,
+         lootAtMost: Int? = nil,
+         intelRecovered: Bool? = nil) {
+        self.objectiveCountAtLeast = objectiveCountAtLeast
+        self.objectiveCountAtMost = objectiveCountAtMost
+        self.objectiveTargetReached = objectiveTargetReached
+        self.radioIntelUnlocked = radioIntelUnlocked
+        self.extractionReady = extractionReady
+        self.victory = victory
+        self.failed = failed
+        self.killsAtLeast = killsAtLeast
+        self.killsAtMost = killsAtMost
+        self.lootAtLeast = lootAtLeast
+        self.lootAtMost = lootAtMost
+        self.intelRecovered = intelRecovered
+    }
+
+    func matches(_ context: MissionScriptEvaluationContext) -> Bool {
+        if let objectiveCountAtLeast, context.objectiveCount < objectiveCountAtLeast {
+            return false
+        }
+        if let objectiveCountAtMost, context.objectiveCount > objectiveCountAtMost {
+            return false
+        }
+        if let objectiveTargetReached, context.objectiveTargetReached != objectiveTargetReached {
+            return false
+        }
+        if let radioIntelUnlocked, context.radioIntelUnlocked != radioIntelUnlocked {
+            return false
+        }
+        if let extractionReady, context.extractionReady != extractionReady {
+            return false
+        }
+        if let victory, context.victory != victory {
+            return false
+        }
+        if let failed, context.failed != failed {
+            return false
+        }
+        if let killsAtLeast, context.kills < killsAtLeast {
+            return false
+        }
+        if let killsAtMost, context.kills > killsAtMost {
+            return false
+        }
+        if let lootAtLeast, context.loot < lootAtLeast {
+            return false
+        }
+        if let lootAtMost, context.loot > lootAtMost {
+            return false
+        }
+        if let intelRecovered, context.intelRecovered != intelRecovered {
+            return false
+        }
+        return true
+    }
+}
+
+private struct MissionScriptEvaluationContext {
+    let objectiveCount: Int
+    let objectiveTarget: Int
+    let extractionReady: Bool
+    let radioIntelUnlocked: Bool
+    let victory: Bool
+    let failed: Bool
+    let kills: Int
+    let loot: Int
+    let intelRecovered: Bool
+
+    var objectiveTargetReached: Bool {
+        objectiveTarget > 0 && objectiveCount >= objectiveTarget
+    }
+}
+
+private struct MissionPresentationSnapshot {
+    var missionBrief: String?
+    var missionPhase: String?
+    var missionBranch: String?
+    var objective: String?
+    var event: String?
+    var radioReport: String?
+    var intelStatus: String?
+    var routeSummary: String?
+    var interactionHint: String?
+    var campaignResult: String?
 }
 
 private struct MissionCampaignStats: Codable {
@@ -178,6 +348,7 @@ private struct CampaignProgress: Codable {
 private struct CampaignSaveEnvelope: Codable {
     let version: Int
     let savedAt: Date
+    let slot: String?
     let mapExpanded: Bool
     let mission: String
     let campaign: CampaignProgress
@@ -188,27 +359,55 @@ private struct CampaignSaveEnvelope: Codable {
 private enum CampaignStore {
     static let version = 4
 
-    static var saveURL: URL {
+    static var supportDirectoryURL: URL {
         let fileManager = FileManager.default
         let supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        return supportURL
-            .appendingPathComponent("MilsimGame", isDirectory: true)
-            .appendingPathComponent("CampaignSave.json", isDirectory: false)
+        return supportURL.appendingPathComponent("MilsimGame", isDirectory: true)
     }
 
-    static func load() throws -> CampaignSaveEnvelope {
-        let data = try Data(contentsOf: saveURL)
+    static var legacySaveURL: URL {
+        supportDirectoryURL.appendingPathComponent("CampaignSave.json", isDirectory: false)
+    }
+
+    static func saveURL(for slot: CampaignSlot) -> URL {
+        supportDirectoryURL.appendingPathComponent(slot.fileName, isDirectory: false)
+    }
+
+    static func load(slot: CampaignSlot, allowLegacyFallback: Bool = false) throws -> CampaignSaveEnvelope {
+        var candidateURLs = [saveURL(for: slot)]
+        if allowLegacyFallback && slot == .alpha {
+            candidateURLs.append(legacySaveURL)
+        }
+
+        var lastMissingFileError: CocoaError?
+        for candidateURL in candidateURLs {
+            do {
+                return try loadEnvelope(at: candidateURL)
+            } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+                lastMissingFileError = error
+            }
+        }
+
+        throw lastMissingFileError ?? CocoaError(.fileReadNoSuchFile)
+    }
+
+    static func preview(slot: CampaignSlot) -> CampaignSaveEnvelope? {
+        try? load(slot: slot, allowLegacyFallback: true)
+    }
+
+    static func loadEnvelope(at url: URL) throws -> CampaignSaveEnvelope {
+        let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(CampaignSaveEnvelope.self, from: data)
     }
 
-    static func save(_ envelope: CampaignSaveEnvelope) throws {
+    static func save(_ envelope: CampaignSaveEnvelope, slot: CampaignSlot) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(envelope)
-        let directoryURL = saveURL.deletingLastPathComponent()
+        let directoryURL = supportDirectoryURL
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        try data.write(to: saveURL, options: .atomic)
+        try data.write(to: saveURL(for: slot), options: .atomic)
     }
 }
 
@@ -242,6 +441,8 @@ private enum CampaignSaveError: LocalizedError {
 }
 
 private enum GameContentBootstrap {
+    nonisolated(unsafe) private(set) static var missionScriptsByKey: [String: MissionScriptRecord] = [:]
+
     static let loadIntoEngine: Void = {
         loadBundleContent()
     }()
@@ -261,6 +462,11 @@ private enum GameContentBootstrap {
             let itemDocument = try decoder.decode(ItemDefinitionsDocument.self, from: Data(contentsOf: itemURL))
             let missionDocument = try decoder.decode(MissionLootTablesDocument.self, from: Data(contentsOf: lootURL))
             let scriptDocument = try scriptURL.map { try decoder.decode(MissionScriptsDocument.self, from: Data(contentsOf: $0)) }
+            if let scriptDocument {
+                missionScriptsByKey = Dictionary(uniqueKeysWithValues: scriptDocument.missions.map { ($0.mission, $0) })
+            } else {
+                missionScriptsByKey = [:]
+            }
             game_content_reset()
 
             for item in itemDocument.items {
@@ -451,6 +657,10 @@ private enum GameContentBootstrap {
         }
     }
 
+    static func missionScript(for missionType: MissionType) -> MissionScriptRecord? {
+        missionScriptsByKey[missionKey(for: missionType)]
+    }
+
     static func itemKind(for rawValue: String) -> ItemKind? {
         switch rawValue.lowercased() {
         case "bullet_box":
@@ -555,6 +765,8 @@ final class GameViewModel: ObservableObject {
     private var mapExpanded = true
     private var firstPersonPresentation = true
     private var campaignProgress = CampaignProgress()
+    private var activeCampaignSlot: CampaignSlot = .alpha
+    private var campaignSlotArchives: [CampaignSlot: CampaignSaveEnvelope] = [:]
     private var saveStatus = "No campaign save stored."
     private var lastSavedAt: Date?
     private var missionResolutionRecorded = false
@@ -562,6 +774,7 @@ final class GameViewModel: ObservableObject {
     init() {
         _ = GameContentBootstrap.loadIntoEngine
         game_init(&state)
+        reloadCampaignSlotArchives()
         if !loadCampaign(startup: true) {
             refreshHUD(force: true)
         }
@@ -583,6 +796,10 @@ final class GameViewModel: ObservableObject {
     }
 
     func saveCampaign() {
+        saveCampaign(to: activeCampaignSlot)
+    }
+
+    func saveCampaign(to slot: CampaignSlot) {
         recordMissionResolutionIfNeeded()
 
         do {
@@ -590,15 +807,18 @@ final class GameViewModel: ObservableObject {
             let envelope = CampaignSaveEnvelope(
                 version: CampaignStore.version,
                 savedAt: savedAt,
+                slot: slot.rawValue,
                 mapExpanded: mapExpanded,
                 mission: GameContentBootstrap.missionKey(for: state.missionType),
                 campaign: campaignProgress,
                 stateSize: MemoryLayout<GameState>.size,
                 stateBlob: encodedStateBlob()
             )
-            try CampaignStore.save(envelope)
+            try CampaignStore.save(envelope, slot: slot)
+            activeCampaignSlot = slot
             lastSavedAt = savedAt
-            saveStatus = "Campaign saved."
+            saveStatus = "\(slot.title) archived."
+            campaignSlotArchives[slot] = envelope
         } catch {
             saveStatus = "Save failed: \(error.localizedDescription)"
         }
@@ -608,7 +828,24 @@ final class GameViewModel: ObservableObject {
 
     @discardableResult
     func loadCampaign() -> Bool {
-        loadCampaign(startup: false)
+        loadCampaign(from: activeCampaignSlot)
+    }
+
+    @discardableResult
+    func loadCampaign(from slot: CampaignSlot) -> Bool {
+        loadCampaign(slot: slot, startup: false, allowLegacyFallback: slot == .alpha)
+    }
+
+    func setCampaignSlot(_ slot: CampaignSlot) {
+        activeCampaignSlot = slot
+        if let archive = campaignSlotArchives[slot] {
+            lastSavedAt = archive.savedAt
+            saveStatus = "\(slot.title) selected. \(displayName(forMissionKey: archive.mission)) archived."
+        } else {
+            lastSavedAt = nil
+            saveStatus = "\(slot.title) selected. No archive stored yet."
+        }
+        refreshHUD(force: true)
     }
 
     func toggleMap() {
@@ -653,8 +890,14 @@ final class GameViewModel: ObservableObject {
     }
 
     private func loadCampaign(startup: Bool) -> Bool {
+        loadCampaign(slot: activeCampaignSlot, startup: startup, allowLegacyFallback: activeCampaignSlot == .alpha)
+    }
+
+    private func loadCampaign(slot: CampaignSlot,
+                              startup: Bool,
+                              allowLegacyFallback: Bool) -> Bool {
         do {
-            let envelope = try CampaignStore.load()
+            let envelope = try CampaignStore.load(slot: slot, allowLegacyFallback: allowLegacyFallback)
 
             guard envelope.version == CampaignStore.version else {
                 throw CampaignSaveError.invalidVersion(envelope.version)
@@ -677,24 +920,34 @@ final class GameViewModel: ObservableObject {
             game_set_mission_cursor(state.missionType)
             game_refresh_loaded_state(&state)
 
+            activeCampaignSlot = slot
             campaignProgress = envelope.campaign
             mapExpanded = envelope.mapExpanded
             lastSavedAt = envelope.savedAt
             missionResolutionRecorded = state.victory || state.missionFailed
             hudAccumulator = 0
+            campaignSlotArchives[slot] = envelope
             saveStatus = startup
-                ? "Campaign resumed."
-                : "Campaign loaded."
+                ? "\(slot.title) resumed."
+                : "\(slot.title) loaded."
+            reloadCampaignSlotArchives()
             refreshHUD(force: true)
             return true
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            saveStatus = startup ? "No campaign save detected." : "No saved campaign found."
+            if !startup {
+                activeCampaignSlot = slot
+            }
+            lastSavedAt = campaignSlotArchives[slot]?.savedAt
+            saveStatus = startup
+                ? "No campaign archive detected."
+                : "No archive found in \(slot.title)."
         } catch {
             saveStatus = startup
                 ? "Campaign resume failed: \(error.localizedDescription)"
                 : "Load failed: \(error.localizedDescription)"
         }
 
+        reloadCampaignSlotArchives()
         return false
     }
 
@@ -720,6 +973,7 @@ final class GameViewModel: ObservableObject {
         var stats = campaignProgress.missionStats[missionKey] ?? MissionCampaignStats()
         stats.attempts += 1
         stats.intelRecovered = stats.intelRecovered || state.radioIntelUnlocked
+        let presentation = withUnsafePointer(to: &state) { missionPresentation(for: $0) }
 
         if state.victory {
             stats.completions += 1
@@ -736,13 +990,25 @@ final class GameViewModel: ObservableObject {
                 campaignProgress.completedMissions.append(missionKey)
                 campaignProgress.completedMissions.sort()
             }
-            campaignProgress.lastResult = "\(displayName(for: state.missionType)) cleared in \(missionTime)s."
+            campaignProgress.lastResult = presentation?.campaignResult
+                ?? "\(displayName(for: state.missionType)) cleared in \(missionTime)s."
         } else {
-            campaignProgress.lastResult = "\(displayName(for: state.missionType)) ended with an operator loss."
+            campaignProgress.lastResult = presentation?.campaignResult
+                ?? "\(displayName(for: state.missionType)) ended with an operator loss."
         }
 
         campaignProgress.missionStats[missionKey] = stats
         missionResolutionRecorded = true
+    }
+
+    private func reloadCampaignSlotArchives() {
+        var refreshedArchives: [CampaignSlot: CampaignSaveEnvelope] = [:]
+        for slot in CampaignSlot.allCases {
+            if let archive = CampaignStore.preview(slot: slot) {
+                refreshedArchives[slot] = archive
+            }
+        }
+        campaignSlotArchives = refreshedArchives
     }
 
     private func displayName(for missionType: MissionType) -> String {
@@ -760,6 +1026,10 @@ final class GameViewModel: ObservableObject {
         }
     }
 
+    private func displayName(forMissionKey missionKey: String) -> String {
+        GameContentBootstrap.missionType(for: missionKey).map(displayName(for:)) ?? "Operation"
+    }
+
     private func timestampString(from date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -771,14 +1041,83 @@ final class GameViewModel: ObservableObject {
         let completedCount = campaignProgress.completedMissions.count
         let totalMissions = 4
         let intelCount = campaignProgress.missionStats.values.filter(\.intelRecovered).count
-        return "Campaign \(completedCount)/\(totalMissions) ops cleared | Intel nets copied \(intelCount) | \(campaignProgress.lastResult)"
+        return "Slot \(activeCampaignSlot.title) | Campaign \(completedCount)/\(totalMissions) ops cleared | Intel nets copied \(intelCount) | \(campaignProgress.lastResult)"
     }
 
     private func saveStatusLine() -> String {
         if let lastSavedAt {
-            return "\(saveStatus) | Last archive \(timestampString(from: lastSavedAt))"
+            return "\(saveStatus) | Active slot \(activeCampaignSlot.title) | Last archive \(timestampString(from: lastSavedAt))"
         }
-        return saveStatus
+        return "\(saveStatus) | Active slot \(activeCampaignSlot.title)"
+    }
+
+    private func campaignSlotSummaries() -> [CampaignSlotSummary] {
+        CampaignSlot.allCases.map { slot in
+            if let archive = campaignSlotArchives[slot] {
+                let completedCount = archive.campaign.completedMissions.count
+                let missionName = displayName(forMissionKey: archive.mission)
+                let savedAt = timestampString(from: archive.savedAt)
+                let detail = "\(completedCount)/4 ops | \(missionName) | \(savedAt)"
+                return CampaignSlotSummary(
+                    id: slot,
+                    title: slot.title,
+                    detail: detail,
+                    isActive: slot == activeCampaignSlot,
+                    hasArchive: true
+                )
+            }
+
+            return CampaignSlotSummary(
+                id: slot,
+                title: slot.title,
+                detail: slot == activeCampaignSlot ? "Active slot | no archive yet" : "Empty slot",
+                isActive: slot == activeCampaignSlot,
+                hasArchive: false
+            )
+        }
+    }
+
+    private func missionContext(for statePointer: UnsafePointer<GameState>) -> MissionScriptEvaluationContext {
+        let objectiveCount = Int(game_mission_objective_count(statePointer))
+        let objectiveTarget = Int(game_mission_objective_target(statePointer))
+        let extractionReady = game_mission_ready_for_extract(statePointer)
+        let radioIntelUnlocked = game_radio_intel_unlocked(statePointer)
+        let kills = Int(statePointer.pointee.kills)
+        let loot = Int(statePointer.pointee.collectedItemCount)
+        return MissionScriptEvaluationContext(
+            objectiveCount: objectiveCount,
+            objectiveTarget: objectiveTarget,
+            extractionReady: extractionReady,
+            radioIntelUnlocked: radioIntelUnlocked,
+            victory: statePointer.pointee.victory,
+            failed: statePointer.pointee.missionFailed,
+            kills: kills,
+            loot: loot,
+            intelRecovered: radioIntelUnlocked
+        )
+    }
+
+    private func missionPresentation(for statePointer: UnsafePointer<GameState>) -> MissionPresentationSnapshot? {
+        guard let script = GameContentBootstrap.missionScript(for: statePointer.pointee.missionType) else {
+            return nil
+        }
+
+        let context = missionContext(for: statePointer)
+        let phase = script.phases?.last(where: { ($0.condition ?? MissionScriptConditionRecord()).matches(context) })
+        let branch = script.branches?.first(where: { ($0.condition ?? MissionScriptConditionRecord()).matches(context) })
+
+        return MissionPresentationSnapshot(
+            missionBrief: phase?.brief ?? script.brief,
+            missionPhase: phase.map { "Phase \($0.title)" },
+            missionBranch: branch.map { "Branch \($0.title) | \($0.summary)" },
+            objective: branch?.objective ?? phase?.objective,
+            event: branch?.event ?? phase?.event,
+            radioReport: phase?.radio,
+            intelStatus: phase?.intelStatus,
+            routeSummary: branch?.routeSummary ?? phase?.routeSummary,
+            interactionHint: phase?.interactionHint,
+            campaignResult: branch?.campaignResult ?? branch?.summary
+        )
     }
 
     private func presentationStatusLine() -> String {
@@ -1059,7 +1398,8 @@ final class GameViewModel: ObservableObject {
             let extractionReady = game_mission_ready_for_extract(statePointer)
             let lootCount = statePointer.pointee.collectedItemCount
             let missionName = string(from: game_mission_name(statePointer))
-            let missionBrief = string(from: game_mission_brief(statePointer))
+            let missionPresentation = missionPresentation(for: statePointer)
+            let missionBrief = missionPresentation?.missionBrief ?? string(from: game_mission_brief(statePointer))
             let stance = string(from: game_player_stance_name(statePointer))
             let fireMode = string(from: game_selected_fire_mode_name(statePointer))
             let lean = game_player_lean(statePointer)
@@ -1160,17 +1500,19 @@ final class GameViewModel: ObservableObject {
             let missionLine = "Kills \(statePointer.pointee.kills) | Loot \(lootCount) | Time \(Int(statePointer.pointee.missionTime))s"
             let compass = compassString(for: SIMD2<Float>(player.aim.x, player.aim.y))
             let gridReference = gridReference(for: playerPosition, worldHalfSize: worldHalfSize)
-            let intelStatus = radioIntelUnlocked
+            let defaultIntelStatus = radioIntelUnlocked
                 ? "Radio intel live. Hostiles and route updates are on the tactical map."
                 : "Radio intel dark. Discover sectors locally or tap a relay for hostile traffic."
-            let radioReport = string(from: game_radio_report(statePointer))
+            let intelStatus = missionPresentation?.intelStatus ?? defaultIntelStatus
+            let radioReport = missionPresentation?.radioReport ?? string(from: game_radio_report(statePointer))
             let baseInteractionHint = interactionHint(for: statePointer, playerPosition: playerPosition)
             let mapTiles = buildMapTiles(from: statePointer)
             let mapMarkers = buildMapMarkers(from: statePointer, playerPosition: playerPosition, radioIntelUnlocked: radioIntelUnlocked)
             let routeSegments = buildRouteSegments(from: statePointer)
-            let routeSummary = routeSummary(from: statePointer, worldHalfSize: worldHalfSize)
+            let routeSummary = missionPresentation?.routeSummary ?? routeSummary(from: statePointer, worldHalfSize: worldHalfSize)
             let campaignStatus = campaignStatusLine()
             let saveStatus = saveStatusLine()
+            let campaignSlots = campaignSlotSummaries()
             let presentationLine = presentationStatusLine()
             let presentationAssist = presentationAssistLine(
                 for: statePointer,
@@ -1190,13 +1532,16 @@ final class GameViewModel: ObservableObject {
             let treatmentHint = needsTreatment
                 ? ((gauzeCount + splintCount) > 0 ? " Press H to treat wounds." : " Recover gauze or a splint to stabilize.")
                 : ""
-            let interactionHint = baseInteractionHint + treatmentHint
+            let scriptHintSuffix = missionPresentation?.interactionHint.map { " \($0)" } ?? ""
+            let interactionHint = baseInteractionHint + treatmentHint + scriptHintSuffix
 
             hud = HUDSnapshot(
                 missionName: missionName,
                 missionBrief: missionBrief,
-                objective: objective,
-                event: string(from: game_last_event(statePointer)),
+                missionPhase: missionPresentation?.missionPhase ?? "Phase Live operation",
+                missionBranch: missionPresentation?.missionBranch ?? "Branch pending | Mission outcome will archive once the operation resolves.",
+                objective: missionPresentation?.objective ?? objective,
+                event: missionPresentation?.event ?? string(from: game_last_event(statePointer)),
                 weapon: selectedName,
                 ammo: ammoLine,
                 signature: signatureLine,
@@ -1216,6 +1561,7 @@ final class GameViewModel: ObservableObject {
                 interactionHint: interactionHint,
                 campaignStatus: campaignStatus,
                 saveStatus: saveStatus,
+                campaignSlots: campaignSlots,
                 worldHalfSize: worldHalfSize,
                 mapExpanded: mapExpanded,
                 mapTiles: mapTiles,
