@@ -11,6 +11,7 @@ extern "C" {
 #define GAME_MAX_ITEMS 96
 #define GAME_MAX_PROJECTILES 64
 #define GAME_MAX_ENEMIES 16
+#define GAME_MAX_TEAMMATES 3
 #define GAME_MAX_INVENTORY 24
 #define GAME_MAX_STRUCTURES 56
 #define GAME_MAX_INTERACTABLES 24
@@ -82,6 +83,12 @@ typedef enum MissionType {
     MissionType_Count = 4
 } MissionType;
 
+typedef enum FireteamOrder {
+    FireteamOrder_Follow = 0,
+    FireteamOrder_Hold = 1,
+    FireteamOrder_Assault = 2
+} FireteamOrder;
+
 typedef enum StructureKind {
     StructureKind_None = 0,
     StructureKind_Ridge = 1,
@@ -145,6 +152,7 @@ typedef struct InputState {
     bool wantsCrouchToggle;
     bool wantsProneToggle;
     bool wantsVault;
+    bool wantsCycleFireteamOrder;
 } InputState;
 
 typedef struct InventoryItem {
@@ -236,6 +244,22 @@ typedef struct Enemy {
     int targetNavNode;
 } Enemy;
 
+typedef struct Teammate {
+    bool active;
+    bool downed;
+    Vec2 position;
+    Vec2 velocity;
+    Vec2 aim;
+    float health;
+    float fireCooldown;
+    float hitTimer;
+    float suppression;
+    float bleedingRate;
+    float pain;
+    int currentRoutePoint;
+    char callsign[24];
+} Teammate;
+
 typedef struct Structure {
     bool active;
     StructureKind kind;
@@ -323,11 +347,13 @@ typedef struct GameState {
     WorldItem worldItems[GAME_MAX_ITEMS];
     Projectile projectiles[GAME_MAX_PROJECTILES];
     Enemy enemies[GAME_MAX_ENEMIES];
+    Teammate teammates[GAME_MAX_TEAMMATES];
     Structure structures[GAME_MAX_STRUCTURES];
     Interactable interactables[GAME_MAX_INTERACTABLES];
     TerrainTile terrainTiles[GAME_MAX_TERRAIN_TILES];
     NavigationNode navigationNodes[GAME_MAX_NAV_NODES];
     Vec2 commandRoutePoints[GAME_MAX_COMMAND_ROUTE_POINTS];
+    Vec2 fireteamHoldAnchor;
     MissionType missionType;
     Vec2 extractionZone;
     float extractionRadius;
@@ -338,6 +364,7 @@ typedef struct GameState {
     int commandRouteCount;
     int collectedItemCount;
     int kills;
+    FireteamOrder fireteamOrder;
     bool victory;
     bool missionFailed;
     bool radioIntelUnlocked;
@@ -356,6 +383,8 @@ void game_cycle_weapon(GameState *state, int direction);
 void game_select_primary(GameState *state);
 void game_select_secondary(GameState *state);
 void game_select_melee(GameState *state);
+void game_cycle_fireteam_order(GameState *state);
+void game_set_fireteam_order(GameState *state, FireteamOrder order);
 
 void game_content_reset(void);
 bool game_content_add_item_template(const char *identifier,
@@ -419,6 +448,11 @@ const WorldItem *game_world_item_at(const GameState *state, size_t index);
 
 size_t game_enemy_count(const GameState *state);
 const Enemy *game_enemy_at(const GameState *state, size_t index);
+
+size_t game_teammate_count(const GameState *state);
+const Teammate *game_teammate_at(const GameState *state, size_t index);
+FireteamOrder game_fireteam_order(const GameState *state);
+const char *game_fireteam_order_name(const GameState *state);
 
 size_t game_projectile_count(const GameState *state);
 const Projectile *game_projectile_at(const GameState *state, size_t index);

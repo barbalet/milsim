@@ -15,6 +15,7 @@ fileprivate enum InputAction: Hashable {
     case crouch
     case prone
     case vault
+    case cycleFireteamOrder
 }
 
 final class InputController {
@@ -54,6 +55,8 @@ final class InputController {
             queuedActions.insert(.prone)
         case 9:
             queuedActions.insert(.vault)
+        case 17:
+            queuedActions.insert(.cycleFireteamOrder)
         case 18:
             queuedActions.insert(.primary)
         case 19:
@@ -140,6 +143,7 @@ final class InputController {
         input.wantsCrouchToggle = queuedActions.remove(.crouch) != nil
         input.wantsProneToggle = queuedActions.remove(.prone) != nil
         input.wantsVault = queuedActions.remove(.vault) != nil
+        input.wantsCycleFireteamOrder = queuedActions.remove(.cycleFireteamOrder) != nil
 
         return input
     }

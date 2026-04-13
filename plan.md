@@ -127,6 +127,13 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Layered phase and branch evaluation over live mission state in SwiftUI so the mission panel, tactical map copy, and campaign archive now react to intel capture, objective progress, extraction readiness, and final mission outcome.
 - Replaced the single campaign archive with Alpha, Bravo, and Charlie save slots exposed in the HUD and menu bar so parallel campaign runs, replays, and mission-state comparisons are possible without overwriting one another.
 
+### Cycle 4 Command Layer Started
+
+- Added a first-pass three-operator friendly fireteam that rides the live C simulation instead of a scripted HUD-only overlay.
+- Added lightweight `Follow`, `Hold`, and `Assault` orders with in-mission cycling plus SwiftUI command buttons so the player can shape spacing and tempo without leaving the firefight.
+- Extended enemy targeting and projectile handling so hostiles can now pressure friendly operators, while teammates return fire, push along the command route, and show their status across the operator panel, tactical map, and first-person presentation.
+- Residual follow-up: deepen order language into rules of engagement and breach/flank behavior, then layer mission scoring and richer alert/search reporting on top of the new command shell.
+
 ## Cycle 0: Foundation and Playable Slice
 
 - Deliver a bootable macOS app with SwiftUI shell, Metal renderer, and C engine.
@@ -229,6 +236,8 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Start the first Cycle 4 command-layer pass with friendly AI teammates or lightweight fireteam orders after the combat/readability passes stop moving core rendering assumptions.
+- Deepen the new Cycle 4 command-layer pass with tighter order language, rules of engagement, breach/flank behaviors, and clearer command feedback now that the first friendly fireteam loop is in place.
+- Add mission scoring for stealth, tempo, casualties, and recovered matériel so the command shell has outcome pressure beyond simple win/loss.
+- Build enemy alert/search reporting around the new fireteam contact model so radio traffic and map copy reflect how the squad fight is actually unfolding.
 - Carry the new visual direction into authored meshes, decals, impact materials, and eventually audio so the scene polish keeps compounding instead of stalling at palette, fog, and scripted mission copy.
 - Deepen the new campaign shell with slot metadata migration, longer branching chains, and debrief rewards once the first command-layer pass settles the broader mission structure.

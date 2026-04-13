@@ -155,5 +155,13 @@ private struct MilsimCommands: Commands {
                 }
             }
         }
+
+        CommandMenu("Fireteam") {
+            ForEach(FireteamOrderChoice.allCases) { order in
+                Button(order.title) {
+                    viewModel.setFireteamOrder(order)
+                }
+            }
+        }
     }
 }

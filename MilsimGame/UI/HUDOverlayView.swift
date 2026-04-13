@@ -132,6 +132,12 @@ struct OperatorPanelView: View {
                 .foregroundStyle(HUDPalette.sand.opacity(0.86))
             Text(hud.posture)
                 .foregroundStyle(HUDPalette.amber)
+            Text(hud.fireteamStatus)
+                .foregroundStyle(HUDPalette.blue.opacity(0.92))
+            ForEach(hud.fireteamMembers) { member in
+                Text("\(member.name) | \(member.detail)")
+                    .foregroundStyle(member.isDowned ? HUDPalette.alert.opacity(0.94) : HUDPalette.sand.opacity(0.84))
+            }
             Text(hud.health)
                 .foregroundStyle(HUDPalette.sand)
             Text(hud.stamina)
@@ -174,6 +180,24 @@ struct TacticalMapPanelView: View {
                     .foregroundStyle(HUDPalette.blue.opacity(0.92))
                 Text(hud.radioReport)
                     .foregroundStyle(HUDPalette.green.opacity(0.92))
+                Text(hud.fireteamStatus)
+                    .foregroundStyle(HUDPalette.amber)
+
+                HStack(spacing: 8) {
+                    ForEach(FireteamOrderChoice.allCases) { order in
+                        Button(order.title) {
+                            viewModel.setFireteamOrder(order)
+                        }
+                        .buttonStyle(HUDButtonStyle(highlighted: hud.fireteamOrder == order))
+                    }
+                }
+
+                if !hud.fireteamMembers.isEmpty {
+                    ForEach(hud.fireteamMembers) { member in
+                        Text("\(member.name) | \(member.detail)")
+                            .foregroundStyle(member.isDowned ? HUDPalette.alert.opacity(0.94) : HUDPalette.sand.opacity(0.82))
+                    }
+                }
 
                 if hud.mapExpanded {
                     TacticalMapView(hud: hud)
@@ -201,6 +225,7 @@ struct ControlsPanelView: View {
             Text("F or Right Mouse use / recover")
             Text("R reload   B fire mode   V vault")
             Text("H treat wounds / use gauze or splint")
+            Text("T cycle fireteam order")
             Text("C crouch   Z prone   Q/E lean")
             Text("Tab or wheel cycle   1 2 3 select")
             Text("P presentation mode   M tactical map")
@@ -513,6 +538,11 @@ private struct TacticalMapView: View {
                 .fill(HUDPalette.blue)
                 .frame(width: 12, height: 12)
                 .overlay(Circle().stroke(HUDPalette.sand, lineWidth: 1))
+        case .friendly:
+            Circle()
+                .fill(HUDPalette.green)
+                .frame(width: 10, height: 10)
+                .overlay(Circle().stroke(HUDPalette.blue.opacity(0.9), lineWidth: 1))
         case .objective:
             Circle()
                 .stroke(HUDPalette.amber, lineWidth: 2)
@@ -578,18 +608,24 @@ private struct TacticalMapView: View {
 }
 
 private struct HUDButtonStyle: ButtonStyle {
+    var highlighted = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(HUDPalette.olive.opacity(configuration.isPressed ? 0.95 : 0.8))
+                    .fill(
+                        highlighted
+                            ? HUDPalette.amber.opacity(configuration.isPressed ? 0.82 : 0.7)
+                            : HUDPalette.olive.opacity(configuration.isPressed ? 0.95 : 0.8)
+                    )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(HUDPalette.amber.opacity(0.7), lineWidth: 1)
+                    .stroke((highlighted ? HUDPalette.sand : HUDPalette.amber).opacity(0.78), lineWidth: 1)
             )
-            .foregroundStyle(HUDPalette.sand)
+            .foregroundStyle(highlighted ? HUDPalette.ink : HUDPalette.sand)
     }
 }

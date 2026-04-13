@@ -12,6 +12,7 @@ static const float kPlayerRadiusStand = 18.0f;
 static const float kPlayerRadiusCrouch = 15.0f;
 static const float kPlayerRadiusProne = 12.0f;
 static const float kEnemyRadius = 18.0f;
+static const float kTeammateRadius = 16.0f;
 static const size_t kCollectionTarget = 8;
 static MissionType sMissionCursor = MissionType_CacheRaid;
 
@@ -105,9 +106,15 @@ static void remove_inventory_item(Player *player, int removedIndex);
 static void apply_player_suppression(GameState *state, float amount, bool announce);
 static void apply_player_hit(GameState *state, float damage, Vec2 impactVelocity);
 static void apply_enemy_hit(GameState *state, Enemy *enemy, float damage, Vec2 impactVelocity, bool announce);
+static void apply_teammate_hit(GameState *state, Teammate *teammate, float damage, Vec2 impactVelocity);
 static void treat_wounds(GameState *state);
 static bool selected_weapon_has_light(const GameState *state);
 static bool selected_weapon_has_laser(const GameState *state);
+static Enemy *nearest_enemy_to_position(GameState *state, Vec2 position, float maxDistance);
+static void update_teammates(GameState *state, float dt);
+static void setup_fireteam(GameState *state, Vec2 anchorPosition);
+static const char *fireteam_order_name(FireteamOrder order);
+static void set_fireteam_order_internal(GameState *state, FireteamOrder order, bool announce);
 
 static float clampf(float value, float minimum, float maximum) {
     if (value < minimum) {
@@ -174,6 +181,21 @@ static Vec2 vec2_rotate(Vec2 value, float radians) {
     return vec2_make((value.x * cosine) - (value.y * sine), (value.x * sine) + (value.y * cosine));
 }
 
+static Vec2 vec2_lerp(Vec2 a, Vec2 b, float t) {
+    return vec2_make(a.x + (b.x - a.x) * t,
+                     a.y + (b.y - a.y) * t);
+}
+
+static Vec2 vec2_right(Vec2 forward) {
+    return vec2_make(forward.y, -forward.x);
+}
+
+static Vec2 rotate_local_offset(Vec2 forward, Vec2 localOffset) {
+    Vec2 right = vec2_right(forward);
+    return vec2_add(vec2_scale(right, localOffset.x),
+                    vec2_scale(forward, localOffset.y));
+}
+
 static void copy_name(char *destination, size_t destinationCount, const char *source) {
     if (destinationCount == 0) {
         return;
@@ -183,6 +205,18 @@ static void copy_name(char *destination, size_t destinationCount, const char *so
 
 static void set_event(GameState *state, const char *event) {
     copy_name(state->lastEvent, sizeof(state->lastEvent), event);
+}
+
+static const char *fireteam_order_name(FireteamOrder order) {
+    switch (order) {
+        case FireteamOrder_Hold:
+            return "Hold";
+        case FireteamOrder_Assault:
+            return "Assault";
+        case FireteamOrder_Follow:
+        default:
+            return "Follow";
+    }
 }
 
 static const MissionScriptDefinition *mission_script_for(MissionType missionType) {
@@ -264,6 +298,40 @@ static float player_radius(const Player *player) {
         default:
             return kPlayerRadiusStand;
     }
+}
+
+static Vec2 fireteam_formation_offset_for_slot(size_t index, FireteamOrder order) {
+    switch (order) {
+        case FireteamOrder_Hold:
+        case FireteamOrder_Assault:
+            switch (index) {
+                case 0:
+                    return vec2_make(-44.0f, -20.0f);
+                case 1:
+                    return vec2_make(44.0f, -28.0f);
+                case 2:
+                default:
+                    return vec2_make(0.0f, -66.0f);
+            }
+        case FireteamOrder_Follow:
+        default:
+            switch (index) {
+                case 0:
+                    return vec2_make(-58.0f, -82.0f);
+                case 1:
+                    return vec2_make(58.0f, -90.0f);
+                case 2:
+                default:
+                    return vec2_make(0.0f, -136.0f);
+            }
+    }
+}
+
+static Vec2 fireteam_anchor_forward(const GameState *state) {
+    if (vec2_length(state->player.velocity) > 8.0f) {
+        return vec2_normalize(state->player.velocity);
+    }
+    return vec2_normalize(state->player.aim);
 }
 
 static float default_weapon_range(WeaponClass weaponClass, float muzzleVelocity) {
@@ -1739,6 +1807,36 @@ static void apply_enemy_hit(GameState *state, Enemy *enemy, float damage, Vec2 i
     }
 }
 
+static void apply_teammate_hit(GameState *state, Teammate *teammate, float damage, Vec2 impactVelocity) {
+    float severity;
+    char buffer[GAME_EVENT_LENGTH];
+
+    if (teammate == NULL || !teammate->active || teammate->downed) {
+        return;
+    }
+
+    severity = clampf((damage / 16.0f) + (vec2_length(impactVelocity) / 1500.0f), 0.35f, 1.6f);
+    teammate->suppression = clampf(teammate->suppression + 20.0f + severity * 14.0f, 0.0f, 100.0f);
+    teammate->pain = clampf(teammate->pain + 12.0f * severity, 0.0f, 100.0f);
+    teammate->bleedingRate = clampf(teammate->bleedingRate + 0.18f * severity, 0.0f, 4.0f);
+    teammate->health = clampf(teammate->health - damage * 0.92f, 0.0f, 100.0f);
+    teammate->hitTimer = 0.28f;
+    teammate->position = vec2_add(teammate->position, vec2_scale(vec2_normalize(impactVelocity), 8.0f));
+
+    if (teammate->health <= 0.0f) {
+        teammate->downed = true;
+        teammate->velocity = vec2_make(0.0f, 0.0f);
+        snprintf(buffer, sizeof(buffer), "%s is down.", teammate->callsign);
+        set_event(state, buffer);
+        return;
+    }
+
+    if (teammate->health < 42.0f && teammate->suppression > 36.0f) {
+        snprintf(buffer, sizeof(buffer), "%s hit hard and needs cover.", teammate->callsign);
+        set_event(state, buffer);
+    }
+}
+
 static void treat_wounds(GameState *state) {
     Player *player = &state->player;
     int gauzeIndex = find_support_item_slot(player, ItemKind_Medkit, "Combat Gauze");
@@ -1942,9 +2040,9 @@ static bool try_penetrate_cover(Projectile *projectile, const Structure *structu
     return projectile->damage >= 4.0f;
 }
 
-static bool player_in_concealment(const GameState *state) {
+static bool position_in_concealment(const GameState *state, Vec2 position, float radius) {
     size_t index;
-    const TerrainTile *tile = terrain_tile_at_position(state, state->player.position);
+    const TerrainTile *tile = terrain_tile_at_position(state, position);
 
     if (tile != NULL && tile->conceals) {
         return true;
@@ -1953,12 +2051,16 @@ static bool player_in_concealment(const GameState *state) {
     for (index = 0; index < GAME_MAX_STRUCTURES; index += 1) {
         const Structure *structure = &state->structures[index];
         if (structure->active && structure->conceals &&
-            position_inside_structure(structure, state->player.position, player_radius(&state->player) + 6.0f)) {
+            position_inside_structure(structure, position, radius + 6.0f)) {
             return true;
         }
     }
 
     return false;
+}
+
+static bool player_in_concealment(const GameState *state) {
+    return position_in_concealment(state, state->player.position, player_radius(&state->player));
 }
 
 static float terrain_speed_multiplier(const GameState *state, Vec2 position) {
@@ -2011,6 +2113,16 @@ static void attempt_move_enemy(const GameState *state, Enemy *enemy, Vec2 desire
 
     if (!position_inside_blocking_structure(state, candidate, kEnemyRadius)) {
         enemy->position = candidate;
+    }
+}
+
+static void attempt_move_teammate(const GameState *state, Teammate *teammate, Vec2 desiredPosition) {
+    Vec2 candidate = desiredPosition;
+    candidate.x = clampf(candidate.x, -kWorldHalfWidth, kWorldHalfWidth);
+    candidate.y = clampf(candidate.y, -kWorldHalfHeight, kWorldHalfHeight);
+
+    if (!position_inside_blocking_structure(state, candidate, kTeammateRadius)) {
+        teammate->position = candidate;
     }
 }
 
@@ -2823,6 +2935,7 @@ static void update_player(GameState *state, const InputState *input, float dt) {
 static void update_projectiles(GameState *state, float dt) {
     size_t index;
     size_t enemyIndex;
+    size_t teammateIndex;
 
     for (index = 0; index < GAME_MAX_PROJECTILES; index += 1) {
         Projectile *projectile = &state->projectiles[index];
@@ -2884,7 +2997,38 @@ static void update_projectiles(GameState *state, float dt) {
                     projectile->nearMissApplied = true;
                 }
             }
-        } else if (vec2_distance(projectile->position, state->player.position) < player_radius(&state->player)) {
+        } else {
+            bool hitTeammate = false;
+
+            for (teammateIndex = 0; teammateIndex < GAME_MAX_TEAMMATES; teammateIndex += 1) {
+                Teammate *teammate = &state->teammates[teammateIndex];
+                if (!teammate->active || teammate->downed) {
+                    continue;
+                }
+
+                if (vec2_distance(projectile->position, teammate->position) < kTeammateRadius) {
+                    float impactScale = clampf(vec2_length(projectile->velocity) / clampf(projectile->initialSpeed, 1.0f, 2400.0f), 0.62f, 1.0f);
+                    apply_teammate_hit(state, teammate, projectile->damage * impactScale, projectile->velocity);
+                    projectile->active = false;
+                    hitTeammate = true;
+                    break;
+                } else if (!projectile->nearMissApplied && vec2_distance(projectile->position, teammate->position) < 104.0f) {
+                    float crackSuppression = projectile->initialSpeed > 940.0f ? 16.0f : 11.0f;
+                    teammate->suppression = clampf(teammate->suppression + crackSuppression, 0.0f, 100.0f);
+                    projectile->nearMissApplied = true;
+                }
+            }
+
+            if (hitTeammate) {
+                continue;
+            }
+        }
+
+        if (projectile->fromPlayer) {
+            continue;
+        }
+
+        if (vec2_distance(projectile->position, state->player.position) < player_radius(&state->player)) {
             float impactScale = clampf(vec2_length(projectile->velocity) / clampf(projectile->initialSpeed, 1.0f, 2400.0f), 0.62f, 1.0f);
             apply_player_hit(state, projectile->damage * impactScale, projectile->velocity);
             projectile->active = false;
@@ -2908,45 +3052,190 @@ static void update_interactables(GameState *state, float dt) {
     }
 }
 
+static Vec2 teammate_assault_target_position(const GameState *state, Teammate *teammate, size_t teammateIndex) {
+    Vec2 forward = fireteam_anchor_forward(state);
+
+    if (state->commandRouteCount > 1) {
+        int routeIndex = clampi(teammate->currentRoutePoint, 1, state->commandRouteCount - 1);
+        while (routeIndex < state->commandRouteCount - 1 &&
+               vec2_distance(teammate->position, state->commandRoutePoints[routeIndex]) < 88.0f) {
+            routeIndex += 1;
+        }
+        teammate->currentRoutePoint = routeIndex;
+
+        if (routeIndex > 0) {
+            Vec2 routeForward = vec2_sub(state->commandRoutePoints[routeIndex], state->commandRoutePoints[routeIndex - 1]);
+            if (vec2_length(routeForward) > 0.01f) {
+                forward = vec2_normalize(routeForward);
+            }
+        }
+
+        return vec2_add(
+            state->commandRoutePoints[routeIndex],
+            rotate_local_offset(forward, fireteam_formation_offset_for_slot(teammateIndex, FireteamOrder_Assault))
+        );
+    }
+
+    return vec2_add(
+        current_command_target_position(state),
+        rotate_local_offset(forward, fireteam_formation_offset_for_slot(teammateIndex, FireteamOrder_Assault))
+    );
+}
+
+static Vec2 teammate_target_position(const GameState *state, Teammate *teammate, size_t teammateIndex) {
+    Vec2 forward = fireteam_anchor_forward(state);
+    Vec2 anchor = state->player.position;
+
+    switch (state->fireteamOrder) {
+        case FireteamOrder_Hold:
+            anchor = state->fireteamHoldAnchor;
+            break;
+        case FireteamOrder_Assault:
+            return teammate_assault_target_position(state, teammate, teammateIndex);
+        case FireteamOrder_Follow:
+        default:
+            break;
+    }
+
+    return vec2_add(
+        anchor,
+        rotate_local_offset(forward, fireteam_formation_offset_for_slot(teammateIndex, state->fireteamOrder))
+    );
+}
+
+static void update_teammates(GameState *state, float dt) {
+    size_t index;
+
+    for (index = 0; index < GAME_MAX_TEAMMATES; index += 1) {
+        Teammate *teammate = &state->teammates[index];
+        Enemy *targetEnemy;
+        Vec2 targetPosition;
+        Vec2 toTargetPosition;
+        float distanceToTargetPosition;
+
+        if (!teammate->active) {
+            continue;
+        }
+
+        teammate->fireCooldown = clampf(teammate->fireCooldown - dt, 0.0f, 100.0f);
+        teammate->hitTimer = clampf(teammate->hitTimer - dt, 0.0f, 10.0f);
+        teammate->suppression = clampf(teammate->suppression - (20.0f * dt), 0.0f, 100.0f);
+        teammate->pain = clampf(teammate->pain - (4.0f * dt), 0.0f, 100.0f);
+        teammate->bleedingRate = clampf(teammate->bleedingRate - (0.03f * dt), 0.0f, 4.0f);
+        teammate->health = clampf(teammate->health - teammate->bleedingRate * dt, 0.0f, 100.0f);
+
+        if (teammate->downed) {
+            teammate->velocity = vec2_make(0.0f, 0.0f);
+            continue;
+        }
+
+        if (teammate->health <= 0.0f) {
+            teammate->downed = true;
+            teammate->velocity = vec2_make(0.0f, 0.0f);
+            set_event(state, "Fireteam operator collapsed from wounds.");
+            continue;
+        }
+
+        targetPosition = teammate_target_position(state, teammate, index);
+        toTargetPosition = vec2_sub(targetPosition, teammate->position);
+        distanceToTargetPosition = vec2_length(toTargetPosition);
+        targetEnemy = nearest_enemy_to_position(
+            state,
+            teammate->position,
+            state->fireteamOrder == FireteamOrder_Assault ? 520.0f : 460.0f
+        );
+
+        if (targetEnemy != NULL) {
+            Vec2 toEnemy = vec2_sub(targetEnemy->position, teammate->position);
+            float distanceToEnemy = vec2_length(toEnemy);
+
+            if (distanceToEnemy > 0.01f) {
+                teammate->aim = vec2_normalize(vec2_lerp(teammate->aim, vec2_normalize(toEnemy), clampf(dt * 6.0f, 0.0f, 1.0f)));
+            }
+
+            if (distanceToEnemy < 440.0f && teammate->fireCooldown <= 0.0f) {
+                float spread = 0.04f + teammate->suppression * 0.003f + teammate->pain * 0.0022f;
+                if (state->fireteamOrder == FireteamOrder_Hold) {
+                    spread *= 0.84f;
+                } else if (state->fireteamOrder == FireteamOrder_Assault) {
+                    spread *= 1.08f;
+                }
+                spread *= sinf(state->missionTime * 1.9f + (float) index * 0.7f);
+                {
+                    Vec2 aim = vec2_rotate(teammate->aim, spread);
+                    spawn_projectile(state,
+                                     vec2_add(teammate->position, vec2_scale(aim, 18.0f)),
+                                     aim,
+                                     930.0f,
+                                     18.0f,
+                                     840.0f,
+                                     true);
+                }
+                teammate->fireCooldown = 0.82f +
+                                         0.12f * (float) index +
+                                         teammate->suppression * 0.009f +
+                                         teammate->pain * 0.004f;
+            }
+        } else if (distanceToTargetPosition > 0.01f) {
+            teammate->aim = vec2_normalize(toTargetPosition);
+        } else {
+            teammate->aim = fireteam_anchor_forward(state);
+        }
+
+        if (distanceToTargetPosition > (state->fireteamOrder == FireteamOrder_Hold ? 22.0f : 14.0f)) {
+            float terrainMultiplier = terrain_speed_multiplier(state, teammate->position);
+            float movePenalty = 1.0f - clampf(teammate->suppression * 0.003f, 0.0f, 0.36f);
+            float moveSpeed = (state->fireteamOrder == FireteamOrder_Assault ? 118.0f : 108.0f) *
+                              terrainMultiplier *
+                              clampf(movePenalty, 0.34f, 1.0f);
+            Vec2 moveDirection = vec2_normalize(toTargetPosition);
+
+            teammate->velocity = vec2_scale(moveDirection, moveSpeed);
+            attempt_move_teammate(state, teammate, vec2_add(teammate->position, vec2_scale(teammate->velocity, dt)));
+        } else {
+            teammate->velocity = vec2_make(0.0f, 0.0f);
+        }
+    }
+}
+
 static void update_enemies(GameState *state, float dt) {
     size_t index;
-    float detectionRange = 490.0f;
+    float playerDetectionRange = 490.0f;
     float playerHeight = terrain_height_at_position(state, state->player.position);
 
     if (state->player.stance == Stance_Crouch) {
-        detectionRange *= 0.8f;
+        playerDetectionRange *= 0.8f;
     } else if (state->player.stance == Stance_Prone) {
-        detectionRange *= 0.62f;
+        playerDetectionRange *= 0.62f;
     }
     if (player_in_concealment(state)) {
-        detectionRange *= 0.72f;
+        playerDetectionRange *= 0.72f;
     }
     if (state->player.noiseTimer > 0.0f) {
-        detectionRange *= 1.0f + clampf(state->player.noiseTimer * 0.24f, 0.06f, 0.75f);
+        playerDetectionRange *= 1.0f + clampf(state->player.noiseTimer * 0.24f, 0.06f, 0.75f);
     }
     if (selected_weapon_has_light(state)) {
-        detectionRange *= 1.1f;
+        playerDetectionRange *= 1.1f;
     } else if (selected_weapon_has_laser(state)) {
-        detectionRange *= 1.05f;
+        playerDetectionRange *= 1.05f;
     }
 
     for (index = 0; index < GAME_MAX_ENEMIES; index += 1) {
         Enemy *enemy = &state->enemies[index];
-        Vec2 toPlayer;
-        float distanceToPlayer;
-        Vec2 moveDirection;
+        Vec2 targetPosition = state->player.position;
         Vec2 aimDirection;
-        float enemyDetectionRange = detectionRange;
+        float distanceToTarget;
         float enemyHeight;
+        bool hasTarget = false;
+        bool targetIsPlayer = true;
+        bool targetInConcealment = player_in_concealment(state);
+        int targetNavNode = -1;
 
         if (!enemy->active) {
             continue;
         }
 
         enemyHeight = terrain_height_at_position(state, enemy->position);
-        if (playerHeight > enemyHeight + 8.0f) {
-            enemyDetectionRange *= 1.08f;
-        }
         enemy->suppression = clampf(enemy->suppression - (18.0f * dt), 0.0f, 100.0f);
         enemy->pain = clampf(enemy->pain - (4.5f * dt), 0.0f, 100.0f);
         enemy->bleedingRate = clampf(enemy->bleedingRate - (0.05f * dt), 0.0f, 8.0f);
@@ -2959,22 +3248,80 @@ static void update_enemies(GameState *state, float dt) {
             continue;
         }
 
-        toPlayer = vec2_sub(state->player.position, enemy->position);
-        distanceToPlayer = vec2_length(toPlayer);
-        aimDirection = vec2_normalize(toPlayer);
+        {
+            float effectivePlayerDetection = playerDetectionRange;
+            Vec2 toPlayer = vec2_sub(state->player.position, enemy->position);
+            float distanceToPlayer = vec2_length(toPlayer);
+            int targetTeammateIndex = -1;
+            float bestTeammateDistance = 1000000.0f;
+            size_t teammateIndex;
+
+            if (playerHeight > enemyHeight + 8.0f) {
+                effectivePlayerDetection *= 1.08f;
+            }
+
+            if (distanceToPlayer < effectivePlayerDetection) {
+                hasTarget = true;
+                targetPosition = state->player.position;
+                targetIsPlayer = true;
+                targetInConcealment = player_in_concealment(state);
+                targetNavNode = nearest_navigation_node(state, state->player.position);
+            }
+
+            for (teammateIndex = 0; teammateIndex < GAME_MAX_TEAMMATES; teammateIndex += 1) {
+                Teammate *teammate = &state->teammates[teammateIndex];
+                float teammateDetectionRange = 450.0f;
+                float teammateHeight;
+                float distanceToTeammate;
+
+                if (!teammate->active || teammate->downed) {
+                    continue;
+                }
+
+                teammateHeight = terrain_height_at_position(state, teammate->position);
+                if (teammateHeight > enemyHeight + 8.0f) {
+                    teammateDetectionRange *= 1.08f;
+                }
+                if (position_in_concealment(state, teammate->position, kTeammateRadius)) {
+                    teammateDetectionRange *= 0.78f;
+                }
+
+                distanceToTeammate = vec2_distance(enemy->position, teammate->position);
+                if (distanceToTeammate < teammateDetectionRange && distanceToTeammate < bestTeammateDistance) {
+                    bestTeammateDistance = distanceToTeammate;
+                    targetTeammateIndex = (int) teammateIndex;
+                }
+            }
+
+            if (targetTeammateIndex >= 0 &&
+                (!hasTarget || bestTeammateDistance < vec2_distance(enemy->position, targetPosition) * 0.92f)) {
+                Teammate *teammate = &state->teammates[targetTeammateIndex];
+                hasTarget = true;
+                targetPosition = teammate->position;
+                targetIsPlayer = false;
+                targetInConcealment = position_in_concealment(state, teammate->position, kTeammateRadius);
+                targetNavNode = nearest_navigation_node(state, teammate->position);
+            }
+        }
+
+        aimDirection = vec2_normalize(vec2_sub(targetPosition, enemy->position));
+        distanceToTarget = vec2_distance(enemy->position, targetPosition);
 
         if (enemy->fallingBack &&
-            distanceToPlayer > 540.0f &&
+            distanceToTarget > 540.0f &&
             enemy->suppression < 16.0f &&
             enemy->pain < 18.0f &&
             enemy->bleedingRate < 0.3f) {
             enemy->fallingBack = false;
         }
 
-        if (enemy->fallingBack && distanceToPlayer < 560.0f) {
+        enemy->fireCooldown = clampf(enemy->fireCooldown - dt, 0.0f, 100.0f);
+
+        if (enemy->fallingBack && hasTarget && distanceToTarget < 560.0f) {
             float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
             float moveSpeed = 104.0f * terrainMultiplier;
             float movePenalty = 1.0f - clampf(enemy->suppression * 0.0028f, 0.0f, 0.36f);
+            Vec2 moveDirection;
 
             if ((enemy->woundFlags & WoundFlag_Leg) != 0) {
                 movePenalty *= 0.8f;
@@ -2987,9 +3334,8 @@ static void update_enemies(GameState *state, float dt) {
             moveDirection = vec2_scale(aimDirection, -1.0f);
             enemy->velocity = vec2_scale(moveDirection, moveSpeed * clampf(movePenalty, 0.32f, 1.0f));
             attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, dt)));
-            enemy->fireCooldown = clampf(enemy->fireCooldown - dt, 0.0f, 100.0f);
 
-            if (distanceToPlayer < 280.0f && enemy->fireCooldown <= 0.0f) {
+            if (distanceToTarget < 280.0f && enemy->fireCooldown <= 0.0f) {
                 float spread = 0.14f + enemy->suppression * 0.004f + enemy->pain * 0.003f;
                 if ((enemy->fractureFlags & FractureFlag_Arm) != 0) {
                     spread += 0.12f;
@@ -3010,9 +3356,10 @@ static void update_enemies(GameState *state, float dt) {
                 }
                 enemy->fireCooldown = 1.18f + enemy->suppression * 0.012f + enemy->pain * 0.008f;
             }
-        } else if (distanceToPlayer < enemyDetectionRange) {
+        } else if (hasTarget) {
             float terrainMultiplier = terrain_speed_multiplier(state, enemy->position);
             float movePenalty = 1.0f - clampf(enemy->suppression * 0.003f, 0.0f, 0.42f);
+            Vec2 moveDirection = aimDirection;
 
             if ((enemy->woundFlags & WoundFlag_Leg) != 0) {
                 movePenalty *= 0.84f;
@@ -3022,11 +3369,10 @@ static void update_enemies(GameState *state, float dt) {
             }
             movePenalty *= (1.0f - clampf(enemy->pain * 0.003f, 0.0f, 0.22f));
 
-            moveDirection = aimDirection;
             enemy->currentNavNode = nearest_navigation_node(state, enemy->position);
-            enemy->targetNavNode = nearest_navigation_node(state, state->player.position);
+            enemy->targetNavNode = targetNavNode;
 
-            if (distanceToPlayer > 170.0f) {
+            if (distanceToTarget > 170.0f) {
                 float moveSpeed = 92.0f * terrainMultiplier * clampf(movePenalty, 0.3f, 1.0f);
                 enemy->velocity = vec2_scale(moveDirection, moveSpeed);
                 attempt_move_enemy(state, enemy, vec2_add(enemy->position, vec2_scale(enemy->velocity, dt)));
@@ -3034,13 +3380,9 @@ static void update_enemies(GameState *state, float dt) {
                 enemy->velocity = vec2_make(0.0f, 0.0f);
             }
 
-            enemy->fireCooldown = clampf(enemy->fireCooldown - dt, 0.0f, 100.0f);
             if (enemy->fireCooldown <= 0.0f) {
-                float spread = 0.08f;
-                if (state->player.stance == Stance_Prone) {
-                    spread = 0.16f;
-                }
-                if (player_in_concealment(state)) {
+                float spread = targetIsPlayer && state->player.stance == Stance_Prone ? 0.16f : 0.08f;
+                if (targetInConcealment) {
                     spread += 0.08f;
                 }
                 spread += enemy->suppression * 0.0032f;
@@ -3229,6 +3571,66 @@ static void setup_common_player(GameState *state, Vec2 startPosition) {
     player->burstShotsRemaining = 0;
     player->triggerHeldLastFrame = false;
     memset(player->inventory, 0, sizeof(player->inventory));
+    setup_fireteam(state, startPosition);
+}
+
+static void setup_fireteam(GameState *state, Vec2 anchorPosition) {
+    static const char *kCallsigns[GAME_MAX_TEAMMATES] = {
+        "Bishop",
+        "Atlas",
+        "Nomad"
+    };
+    size_t index;
+    Vec2 forward = vec2_make(1.0f, 0.0f);
+
+    memset(state->teammates, 0, sizeof(state->teammates));
+    state->fireteamHoldAnchor = anchorPosition;
+    state->fireteamOrder = FireteamOrder_Follow;
+
+    for (index = 0; index < GAME_MAX_TEAMMATES; index += 1) {
+        Vec2 offset = rotate_local_offset(forward, fireteam_formation_offset_for_slot(index, FireteamOrder_Follow));
+        Teammate *teammate = &state->teammates[index];
+        teammate->active = true;
+        teammate->downed = false;
+        teammate->position = vec2_add(anchorPosition, offset);
+        teammate->velocity = vec2_make(0.0f, 0.0f);
+        teammate->aim = forward;
+        teammate->health = 100.0f;
+        teammate->fireCooldown = 0.3f + (float) index * 0.08f;
+        teammate->hitTimer = 0.0f;
+        teammate->suppression = 0.0f;
+        teammate->bleedingRate = 0.0f;
+        teammate->pain = 0.0f;
+        teammate->currentRoutePoint = 1;
+        copy_name(teammate->callsign, sizeof(teammate->callsign), kCallsigns[index]);
+    }
+}
+
+static void set_fireteam_order_internal(GameState *state, FireteamOrder order, bool announce) {
+    char buffer[GAME_EVENT_LENGTH];
+    size_t index;
+
+    if (order < FireteamOrder_Follow || order > FireteamOrder_Assault) {
+        order = FireteamOrder_Follow;
+    }
+
+    if (state->fireteamOrder == order) {
+        return;
+    }
+
+    state->fireteamOrder = order;
+    if (order == FireteamOrder_Hold) {
+        state->fireteamHoldAnchor = state->player.position;
+    }
+
+    for (index = 0; index < GAME_MAX_TEAMMATES; index += 1) {
+        state->teammates[index].currentRoutePoint = 1;
+    }
+
+    if (announce) {
+        snprintf(buffer, sizeof(buffer), "Fireteam set to %s.", fireteam_order_name(order));
+        set_event(state, buffer);
+    }
 }
 
 static void setup_cache_raid(GameState *state) {
@@ -3594,6 +3996,15 @@ void game_select_melee(GameState *state) {
     }
 }
 
+void game_cycle_fireteam_order(GameState *state) {
+    FireteamOrder nextOrder = (FireteamOrder) ((state->fireteamOrder + 1) % 3);
+    set_fireteam_order_internal(state, nextOrder, true);
+}
+
+void game_set_fireteam_order(GameState *state, FireteamOrder order) {
+    set_fireteam_order_internal(state, order, true);
+}
+
 void game_update(GameState *state, const InputState *input, float dt) {
     bool shouldFire = false;
     InventoryItem *item;
@@ -3628,6 +4039,9 @@ void game_update(GameState *state, const InputState *input, float dt) {
     }
     if (input->wantsVault) {
         try_vault(state);
+    }
+    if (input->wantsCycleFireteamOrder) {
+        game_cycle_fireteam_order(state);
     }
     if (input->wantsCollect) {
         interact_nearby(state);
@@ -3671,6 +4085,7 @@ void game_update(GameState *state, const InputState *input, float dt) {
 
     update_projectiles(state, dt);
     update_interactables(state, dt);
+    update_teammates(state, dt);
     update_enemies(state, dt);
     update_discovery(state);
     update_command_route(state);
@@ -3818,6 +4233,40 @@ const Enemy *game_enemy_at(const GameState *state, size_t index) {
         count += 1;
     }
     return NULL;
+}
+
+size_t game_teammate_count(const GameState *state) {
+    size_t count = 0;
+    size_t index;
+    for (index = 0; index < GAME_MAX_TEAMMATES; index += 1) {
+        if (state->teammates[index].active) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+const Teammate *game_teammate_at(const GameState *state, size_t index) {
+    size_t count = 0;
+    size_t teammateIndex;
+    for (teammateIndex = 0; teammateIndex < GAME_MAX_TEAMMATES; teammateIndex += 1) {
+        if (!state->teammates[teammateIndex].active) {
+            continue;
+        }
+        if (count == index) {
+            return &state->teammates[teammateIndex];
+        }
+        count += 1;
+    }
+    return NULL;
+}
+
+FireteamOrder game_fireteam_order(const GameState *state) {
+    return state->fireteamOrder;
+}
+
+const char *game_fireteam_order_name(const GameState *state) {
+    return fireteam_order_name(state->fireteamOrder);
 }
 
 size_t game_projectile_count(const GameState *state) {

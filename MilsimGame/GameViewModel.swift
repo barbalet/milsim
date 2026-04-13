@@ -12,6 +12,54 @@ struct InventoryRow: Identifiable {
     let isSelected: Bool
 }
 
+struct FireteamMemberRow: Identifiable {
+    let id: Int
+    let name: String
+    let detail: String
+    let isDowned: Bool
+}
+
+enum FireteamOrderChoice: Int, CaseIterable, Identifiable {
+    case follow
+    case hold
+    case assault
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .follow:
+            return "Follow"
+        case .hold:
+            return "Hold"
+        case .assault:
+            return "Assault"
+        }
+    }
+
+    init(cValue: FireteamOrder) {
+        switch cValue {
+        case FireteamOrder_Hold:
+            self = .hold
+        case FireteamOrder_Assault:
+            self = .assault
+        default:
+            self = .follow
+        }
+    }
+
+    var cValue: FireteamOrder {
+        switch self {
+        case .follow:
+            return FireteamOrder_Follow
+        case .hold:
+            return FireteamOrder_Hold
+        case .assault:
+            return FireteamOrder_Assault
+        }
+    }
+}
+
 enum CampaignSlot: String, CaseIterable, Codable, Identifiable {
     case alpha
     case bravo
@@ -62,6 +110,7 @@ struct TacticalMapTile: Identifiable {
 
 enum TacticalMarkerKind {
     case player
+    case friendly
     case objective
     case extraction
     case door
@@ -99,6 +148,9 @@ struct HUDSnapshot {
     var presentation = ""
     var presentationAssist = ""
     var posture = ""
+    var fireteamOrder: FireteamOrderChoice = .follow
+    var fireteamStatus = ""
+    var fireteamMembers: [FireteamMemberRow] = []
     var health = ""
     var stamina = ""
     var wounds = ""
@@ -357,7 +409,7 @@ private struct CampaignSaveEnvelope: Codable {
 }
 
 private enum CampaignStore {
-    static let version = 4
+    static let version = 5
 
     static var supportDirectoryURL: URL {
         let fileManager = FileManager.default
@@ -855,6 +907,16 @@ final class GameViewModel: ObservableObject {
 
     func togglePresentation() {
         firstPersonPresentation.toggle()
+        refreshHUD(force: true)
+    }
+
+    func cycleFireteamOrder() {
+        game_cycle_fireteam_order(&state)
+        refreshHUD(force: true)
+    }
+
+    func setFireteamOrder(_ order: FireteamOrderChoice) {
+        game_set_fireteam_order(&state, order.cValue)
         refreshHUD(force: true)
     }
 
@@ -1520,6 +1582,54 @@ final class GameViewModel: ObservableObject {
                 aim: aimVector,
                 selectedIndex: selectedIndex
             )
+            let fireteamOrder = FireteamOrderChoice(cValue: game_fireteam_order(statePointer))
+            let teammateCount = Int(game_teammate_count(statePointer))
+            var fireteamMembers: [FireteamMemberRow] = []
+            fireteamMembers.reserveCapacity(teammateCount)
+            var fireteamUpCount = 0
+            var fireteamEngagedCount = 0
+
+            for index in 0..<teammateCount {
+                guard let teammate = game_teammate_at(statePointer, index)?.pointee else {
+                    continue
+                }
+
+                let name = string(fromTuple: teammate.callsign)
+                let status: String
+                if teammate.downed {
+                    status = "Down"
+                } else if teammate.health < 42 || teammate.bleedingRate > 0.2 {
+                    status = "Wounded"
+                } else if teammate.suppression > 34 {
+                    status = "Pinned"
+                } else if teammate.fireCooldown > 0.45 {
+                    status = "Engaging"
+                } else if simd_length(SIMD2<Float>(teammate.velocity.x, teammate.velocity.y)) > 18 {
+                    status = fireteamOrder == .assault ? "Pushing" : "Moving"
+                } else {
+                    status = "Ready"
+                }
+
+                if !teammate.downed {
+                    fireteamUpCount += 1
+                }
+                if status == "Engaging" || status == "Pushing" {
+                    fireteamEngagedCount += 1
+                }
+
+                fireteamMembers.append(
+                    FireteamMemberRow(
+                        id: index,
+                        name: name,
+                        detail: teammate.downed
+                            ? "Down | Await relief"
+                            : "\(status) | \(Int(teammate.health.rounded())) hp | Supp \(Int(teammate.suppression.rounded()))%",
+                        isDowned: teammate.downed
+                    )
+                )
+            }
+
+            let fireteamStatus = "Order \(fireteamOrder.title) | \(fireteamUpCount)/\(teammateCount) up | \(fireteamEngagedCount) engaging"
             let healthLine = "Health \(Int(game_player_health(statePointer))) | Pain \(Int(player.pain.rounded())) | Shock \(Int(player.staminaShock.rounded()))"
             let staminaLine = "Stamina \(Int(game_player_stamina(statePointer))) | Supp \(Int(player.suppression.rounded()))%"
             let woundLine = "Wounds \(woundSummary(for: UInt32(player.woundFlags))) | Fractures \(fractureSummary(for: UInt32(player.fractureFlags)))"
@@ -1548,6 +1658,9 @@ final class GameViewModel: ObservableObject {
                 presentation: presentationLine,
                 presentationAssist: presentationAssist,
                 posture: "\(stance)\(leanText)",
+                fireteamOrder: fireteamOrder,
+                fireteamStatus: fireteamStatus,
+                fireteamMembers: fireteamMembers,
                 health: healthLine,
                 stamina: staminaLine,
                 wounds: woundLine,
@@ -1646,6 +1759,20 @@ final class GameViewModel: ObservableObject {
         }
 
         appendMarker(position: playerPosition, kind: .player, label: "You", prominent: true)
+
+        let teammateCount = Int(game_teammate_count(statePointer))
+        for index in 0..<teammateCount {
+            guard let teammate = game_teammate_at(statePointer, index)?.pointee else {
+                continue
+            }
+
+            appendMarker(
+                position: SIMD2<Float>(teammate.position.x, teammate.position.y),
+                kind: .friendly,
+                label: string(fromTuple: teammate.callsign),
+                prominent: !teammate.downed
+            )
+        }
 
         let extraction = statePointer.pointee.extractionZone
         appendMarker(
@@ -1785,7 +1912,7 @@ final class GameViewModel: ObservableObject {
 
     private func interactionHint(for statePointer: UnsafePointer<GameState>, playerPosition: SIMD2<Float>) -> String {
         var bestDistance = Float.greatestFiniteMagnitude
-        var hint = "Recover field gear and use radios, gates, crates, and emplaced guns with F."
+        var hint = "Recover field gear with F and tap T to cycle fireteam orders."
 
         let interactableCount = Int(game_interactable_count(statePointer))
         for index in 0..<interactableCount {
@@ -1803,15 +1930,15 @@ final class GameViewModel: ObservableObject {
             let label = string(fromTuple: interactable.name)
             switch interactable.kind {
             case InteractableKind_Door:
-                hint = "Use F to toggle \(label)."
+                hint = "Use F to toggle \(label). T cycles fireteam orders."
             case InteractableKind_SupplyCrate:
-                hint = "Use F to resupply from \(label)."
+                hint = "Use F to resupply from \(label). T cycles fireteam orders."
             case InteractableKind_DeadDrop:
-                hint = "Use F to recover \(label)."
+                hint = "Use F to recover \(label). T cycles fireteam orders."
             case InteractableKind_Radio:
-                hint = "Use F to copy \(label) intel."
+                hint = "Use F to copy \(label) intel. T cycles fireteam orders."
             case InteractableKind_EmplacedWeapon:
-                hint = "Use F to fire \(label)."
+                hint = "Use F to fire \(label). T cycles fireteam orders."
             default:
                 break
             }
@@ -1830,7 +1957,7 @@ final class GameViewModel: ObservableObject {
             }
 
             bestDistance = distance
-            hint = "Use F to recover \(string(fromTuple: item.name))."
+            hint = "Use F to recover \(string(fromTuple: item.name)). T cycles fireteam orders."
         }
 
         return hint

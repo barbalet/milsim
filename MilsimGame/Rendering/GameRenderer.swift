@@ -559,6 +559,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             addFirstPersonStructuresWorld(to: &worldInstances, statePointer: statePointer)
             addFirstPersonInteractablesWorld(to: &worldInstances, statePointer: statePointer)
             addFirstPersonItemsWorld(to: &worldInstances, statePointer: statePointer)
+            addFirstPersonTeammatesWorld(to: &worldInstances, statePointer: statePointer, playerPosition: playerPosition)
             addFirstPersonEnemiesWorld(to: &worldInstances, statePointer: statePointer, playerPosition: playerPosition)
             addFirstPersonProjectilesWorld(to: &worldInstances, statePointer: statePointer)
             addFirstPersonHorizonBackdrop(
@@ -772,6 +773,22 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 let flash: Float = enemy.hitTimer > 0 ? 0.24 : 0.0
                 instances.append(makeInstance(position: position, size: SIMD2<Float>(34, 34), color: SIMD4<Float>(0.72 + flash, 0.18 + (0.3 * healthFactor), 0.15, 0.96), rotation: 0, shape: .circle))
                 instances.append(makeInstance(position: position + SIMD2<Float>(0, -28), size: SIMD2<Float>(42 * healthFactor, 5), color: SIMD4<Float>(0.95, 0.78, 0.2, 0.8), rotation: 0, shape: .rectangle))
+            }
+
+            let teammateCount = Int(game_teammate_count(statePointer))
+            for index in 0..<teammateCount {
+                guard let teammate = game_teammate_at(statePointer, index)?.pointee else {
+                    continue
+                }
+
+                let position = SIMD2<Float>(teammate.position.x, teammate.position.y)
+                let healthFactor = max(0.2, teammate.health / 100)
+                let flash: Float = teammate.hitTimer > 0 ? 0.18 : 0.0
+                let bodyColor = teammate.downed
+                    ? SIMD4<Float>(0.34, 0.22, 0.2, 0.74)
+                    : SIMD4<Float>(0.24, 0.72 + flash, 0.58 + flash * 0.2, 0.94)
+                instances.append(makeInstance(position: position, size: SIMD2<Float>(30, 30), color: bodyColor, rotation: 0, shape: .circle))
+                instances.append(makeInstance(position: position + SIMD2<Float>(0, -26), size: SIMD2<Float>(38 * healthFactor, 5), color: teammate.downed ? SIMD4<Float>(0.62, 0.28, 0.22, 0.66) : SIMD4<Float>(0.34, 0.86, 0.58, 0.82), rotation: 0, shape: .rectangle))
             }
 
             let projectileCount = Int(game_projectile_count(statePointer))
@@ -1462,6 +1479,52 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.82, positionXZ.y), size: SIMD3<Float>(0.05, 1.05, 0.05), color: mixedColor(pickupColor, SIMD4<Float>(1.0, 0.94, 0.58, 0.94), amount: 0.42), lighting: 1.08)
             default:
                 break
+            }
+        }
+    }
+
+    private func addFirstPersonTeammatesWorld(to instances: inout [World3DInstance],
+                                              statePointer: UnsafePointer<GameState>,
+                                              playerPosition: SIMD2<Float>) {
+        let teammateCount = Int(game_teammate_count(statePointer))
+        for index in 0..<teammateCount {
+            guard let teammate = game_teammate_at(statePointer, index)?.pointee, teammate.active else {
+                continue
+            }
+
+            let worldPosition = SIMD2<Float>(teammate.position.x, teammate.position.y)
+            let ground = terrainElevation(at: worldPosition, statePointer: statePointer)
+            let positionXZ = renderWorldPosition(worldPosition)
+            let healthFactor = max(0.2, teammate.health / 100)
+            let flash: Float = teammate.hitTimer > 0 ? 0.18 : 0.0
+            let yaw = atan2f(playerPosition.x - teammate.position.x, playerPosition.y - teammate.position.y)
+            let bodyColor = teammate.downed
+                ? SIMD4<Float>(0.34, 0.22, 0.2, 0.76)
+                : SIMD4<Float>(0.22, 0.66 + flash, 0.52 + 0.24 * healthFactor, 0.98)
+
+            appendWorldBox(
+                to: &instances,
+                position: SIMD3<Float>(positionXZ.x, ground + (teammate.downed ? 0.52 : 0.86), positionXZ.y),
+                size: SIMD3<Float>(0.32, teammate.downed ? 0.44 : 1.08, 0.22),
+                color: bodyColor,
+                yaw: yaw
+            )
+            appendWorldBox(
+                to: &instances,
+                position: SIMD3<Float>(positionXZ.x, ground + (teammate.downed ? 0.68 : 1.58), positionXZ.y),
+                size: SIMD3<Float>(0.22, teammate.downed ? 0.16 : 0.24, 0.22),
+                color: bodyColor,
+                yaw: yaw,
+                lighting: 0.96
+            )
+            if !teammate.downed {
+                appendWorldBox(
+                    to: &instances,
+                    position: SIMD3<Float>(positionXZ.x + 0.08 * sinf(yaw), ground + 1.04, positionXZ.y + 0.08 * cosf(yaw)),
+                    size: SIMD3<Float>(0.08, 0.08, 0.32),
+                    color: SIMD4<Float>(0.16, 0.2, 0.2, 0.98),
+                    yaw: yaw
+                )
             }
         }
     }
@@ -2725,6 +2788,23 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 )
             }
 
+            let teammateCount = Int(game_teammate_count(statePointer))
+            for index in 0..<teammateCount {
+                guard let teammate = game_teammate_at(statePointer, index)?.pointee else {
+                    continue
+                }
+                addFirstPersonTeammate(
+                    teammate,
+                    to: &layers,
+                    playerPosition: playerPosition,
+                    forward: forward,
+                    right: right,
+                    horizon: horizon,
+                    cameraOffset: cameraOffset,
+                    occlusionField: occlusionField
+                )
+            }
+
             let projectileCount = Int(game_projectile_count(statePointer))
             for index in 0..<projectileCount {
                 guard let projectile = game_projectile_at(statePointer, index)?.pointee else {
@@ -3099,6 +3179,47 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             centeredness: abs(screen.position.x),
             visibility: visibility
         )
+        layers.append(PerspectiveLayer(depth: screen.depth, instances: layerInstances))
+    }
+
+    private func addFirstPersonTeammate(_ teammate: Teammate,
+                                        to layers: inout [PerspectiveLayer],
+                                        playerPosition: SIMD2<Float>,
+                                        forward: SIMD2<Float>,
+                                        right: SIMD2<Float>,
+                                        horizon: Float,
+                                        cameraOffset: Float,
+                                        occlusionField: OcclusionField) {
+        let position = SIMD2<Float>(teammate.position.x, teammate.position.y)
+        let screen = projectFootprint(
+            worldPosition: position,
+            width: 30,
+            height: teammate.downed ? 46 : 82,
+            playerPosition: playerPosition,
+            forward: forward,
+            right: right,
+            horizon: horizon,
+            cameraOffset: cameraOffset
+        )
+        guard let screen else {
+            return
+        }
+
+        let visibility = occlusionField.visibility(center: screen.position.x, width: screen.size.x * 0.88, depth: screen.depth, softness: 18)
+        if visibility < 0.1 {
+            return
+        }
+
+        let healthFactor = max(0.2, teammate.health / 100)
+        let flash: Float = teammate.hitTimer > 0 ? 0.16 : 0
+        let bodyColor = teammate.downed
+            ? alphaAdjusted(SIMD4<Float>(0.38, 0.24, 0.22, 0.78), factor: visibility, minimumAlpha: 0.1)
+            : alphaAdjusted(SIMD4<Float>(0.22, 0.72 + flash, 0.58 + 0.22 * healthFactor, 0.96), factor: visibility, minimumAlpha: 0.1)
+        var layerInstances: [RenderInstance] = []
+        layerInstances.append(makeInstance(position: SIMD2<Float>(screen.position.x, screen.footY - 0.008), size: SIMD2<Float>(max(0.04, screen.size.x * 0.56), 0.04), color: alphaAdjusted(SIMD4<Float>(0.02, 0.02, 0.02, 0.24), factor: visibility, minimumAlpha: 0.03), rotation: 0, shape: .circle))
+        layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, teammate.downed ? screen.size.y * 0.14 : screen.size.y * 0.1), size: screen.size * SIMD2<Float>(0.4, teammate.downed ? 0.28 : 0.5), color: bodyColor, rotation: 0, shape: .rectangle))
+        layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, teammate.downed ? -screen.size.y * 0.04 : -screen.size.y * 0.28), size: screen.size * SIMD2<Float>(0.24, teammate.downed ? 0.14 : 0.24), color: bodyColor, rotation: 0, shape: .circle))
+        layerInstances.append(makeInstance(position: screen.position + SIMD2<Float>(0, -screen.size.y * 0.52), size: SIMD2<Float>(max(0.08, screen.size.x * 0.68 * healthFactor), max(0.012, screen.size.y * 0.08)), color: alphaAdjusted(teammate.downed ? SIMD4<Float>(0.62, 0.28, 0.22, 0.78) : SIMD4<Float>(0.3, 0.88, 0.58, 0.86), factor: visibility, minimumAlpha: 0.06), rotation: 0, shape: .rectangle))
         layers.append(PerspectiveLayer(depth: screen.depth, instances: layerInstances))
     }
 
