@@ -146,6 +146,14 @@ private struct World3DUniforms {
     var hazeColor: SIMD4<Float>
 }
 
+private struct MeshInstanceUniforms {
+    var modelMatrix: simd_float4x4
+    var normalMatrix: simd_float3x3
+    var color: SIMD4<Float>
+    var lighting: Float
+    var padding: SIMD3<Float> = .zero
+}
+
 private struct FirstPersonCameraRig {
     var position: SIMD3<Float>
     var forward: SIMD3<Float>
@@ -161,7 +169,20 @@ private struct FirstPersonWorldScene {
     var worldUniforms: World3DUniforms
     var backdropInstances: [RenderInstance]
     var worldInstances: [World3DInstance]
+    var meshDraws: [FirstPersonMeshDraw]
+    var viewmodelMeshDraws: [FirstPersonMeshDraw]
     var overlayInstances: [RenderInstance]
+}
+
+private struct FirstPersonMeshDraw {
+    var assetID: PrimaryAssetID
+    var position: SIMD3<Float>
+    var size: SIMD3<Float>
+    var yaw: Float
+    var pitch: Float
+    var roll: Float
+    var color: SIMD4<Float>
+    var lighting: Float
 }
 
 private struct FirstPersonAimSolution {
@@ -250,6 +271,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
     private let firstPersonPipelineState: MTLRenderPipelineState
+    private let firstPersonMeshPipelineState: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
     private let overlayDepthState: MTLDepthStencilState
     private let quadVertexBuffer: MTLBuffer
@@ -258,6 +280,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     private let worldInstanceBuffer: MTLBuffer
     private let uniformsBuffer: MTLBuffer
     private let worldUniformsBuffer: MTLBuffer
+    private let meshUniformsBuffer: MTLBuffer
+    private let primaryAssetLibrary: PrimaryAssetLibrary
     private let inputController: InputController
 
     private var lastFrameTime: CFTimeInterval?
@@ -299,11 +323,18 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             fatalError("Unable to load the default Metal library: \(error.localizedDescription)")
         }
 
+        do {
+            primaryAssetLibrary = try PrimaryAssetLibrary(device: self.device)
+        } catch {
+            fatalError("Unable to load primary 3D assets: \(error.localizedDescription)")
+        }
+
         guard
             let vertexFunction = library.makeFunction(name: "instancedVertex"),
             let fragmentFunction = library.makeFunction(name: "instancedFragment"),
             let firstPersonVertexFunction = library.makeFunction(name: "firstPersonWorldVertex"),
-            let firstPersonFragmentFunction = library.makeFunction(name: "firstPersonWorldFragment")
+            let firstPersonFragmentFunction = library.makeFunction(name: "firstPersonWorldFragment"),
+            let firstPersonMeshVertexFunction = library.makeFunction(name: "firstPersonMeshVertex")
         else {
             fatalError("Unable to load Metal shader functions.")
         }
@@ -332,9 +363,23 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         firstPersonPipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
         firstPersonPipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
+        let firstPersonMeshPipelineDescriptor = MTLRenderPipelineDescriptor()
+        firstPersonMeshPipelineDescriptor.label = "MilsimGameFirstPersonMeshPipeline"
+        firstPersonMeshPipelineDescriptor.vertexFunction = firstPersonMeshVertexFunction
+        firstPersonMeshPipelineDescriptor.fragmentFunction = firstPersonFragmentFunction
+        firstPersonMeshPipelineDescriptor.vertexDescriptor = PrimaryAssetLibrary.makeMetalVertexDescriptor()
+        firstPersonMeshPipelineDescriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
+        firstPersonMeshPipelineDescriptor.depthAttachmentPixelFormat = view.depthStencilPixelFormat
+        firstPersonMeshPipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
+        firstPersonMeshPipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        firstPersonMeshPipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        firstPersonMeshPipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+        firstPersonMeshPipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
         do {
             pipelineState = try self.device.makeRenderPipelineState(descriptor: pipelineDescriptor)
             firstPersonPipelineState = try self.device.makeRenderPipelineState(descriptor: firstPersonPipelineDescriptor)
+            firstPersonMeshPipelineState = try self.device.makeRenderPipelineState(descriptor: firstPersonMeshPipelineDescriptor)
         } catch {
             fatalError("Unable to create the Metal pipeline: \(error.localizedDescription)")
         }
@@ -364,6 +409,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             let worldInstanceBuffer = self.device.makeBuffer(length: MemoryLayout<World3DInstance>.stride * maxWorldInstances),
             let uniformsBuffer = self.device.makeBuffer(length: MemoryLayout<RenderUniforms>.stride),
             let worldUniformsBuffer = self.device.makeBuffer(length: MemoryLayout<World3DUniforms>.stride),
+            let meshUniformsBuffer = self.device.makeBuffer(length: MemoryLayout<MeshInstanceUniforms>.stride),
             let depthState = self.device.makeDepthStencilState(descriptor: depthDescriptor),
             let overlayDepthState = self.device.makeDepthStencilState(descriptor: overlayDepthDescriptor)
         else {
@@ -376,6 +422,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         self.worldInstanceBuffer = worldInstanceBuffer
         self.uniformsBuffer = uniformsBuffer
         self.worldUniformsBuffer = worldUniformsBuffer
+        self.meshUniformsBuffer = meshUniformsBuffer
         self.depthState = depthState
         self.overlayDepthState = overlayDepthState
 
@@ -463,28 +510,95 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     private func encodeFirstPersonWorld(_ scene: FirstPersonWorldScene,
                                         into encoder: MTLRenderCommandEncoder) {
         let worldCount = min(scene.worldInstances.count, maxWorldInstances)
-        guard worldCount > 0 else {
+        guard worldCount > 0 || !scene.meshDraws.isEmpty || !scene.viewmodelMeshDraws.isEmpty else {
             return
         }
 
-        let compactInstances = Array(scene.worldInstances.prefix(worldCount))
-        compactInstances.withUnsafeBytes { rawBuffer in
-            guard let baseAddress = rawBuffer.baseAddress else {
-                return
+        if worldCount > 0 {
+            let compactInstances = Array(scene.worldInstances.prefix(worldCount))
+            compactInstances.withUnsafeBytes { rawBuffer in
+                guard let baseAddress = rawBuffer.baseAddress else {
+                    return
+                }
+                memcpy(worldInstanceBuffer.contents(), baseAddress, rawBuffer.count)
             }
-            memcpy(worldInstanceBuffer.contents(), baseAddress, rawBuffer.count)
         }
 
         var uniforms = scene.worldUniforms
         memcpy(worldUniformsBuffer.contents(), &uniforms, MemoryLayout<World3DUniforms>.stride)
 
-        encoder.setRenderPipelineState(firstPersonPipelineState)
+        if worldCount > 0 {
+            encoder.setRenderPipelineState(firstPersonPipelineState)
+            encoder.setDepthStencilState(depthState)
+            encoder.setVertexBuffer(cubeVertexBuffer, offset: 0, index: 0)
+            encoder.setVertexBuffer(worldInstanceBuffer, offset: 0, index: 1)
+            encoder.setVertexBuffer(worldUniformsBuffer, offset: 0, index: 2)
+            encoder.setFragmentBuffer(worldUniformsBuffer, offset: 0, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: cubeVertexCount, instanceCount: worldCount)
+        }
+
+        if !scene.meshDraws.isEmpty {
+            encodeFirstPersonMeshes(scene.meshDraws, into: encoder, depthState: depthState)
+        }
+
+        if !scene.viewmodelMeshDraws.isEmpty {
+            encodeFirstPersonMeshes(scene.viewmodelMeshDraws, into: encoder, depthState: overlayDepthState)
+        }
+    }
+
+    private func encodeFirstPersonMeshes(_ meshDraws: [FirstPersonMeshDraw],
+                                         into encoder: MTLRenderCommandEncoder,
+                                         depthState: MTLDepthStencilState) {
+        encoder.setRenderPipelineState(firstPersonMeshPipelineState)
         encoder.setDepthStencilState(depthState)
-        encoder.setVertexBuffer(cubeVertexBuffer, offset: 0, index: 0)
-        encoder.setVertexBuffer(worldInstanceBuffer, offset: 0, index: 1)
-        encoder.setVertexBuffer(worldUniformsBuffer, offset: 0, index: 2)
         encoder.setFragmentBuffer(worldUniformsBuffer, offset: 0, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: cubeVertexCount, instanceCount: worldCount)
+
+        for meshDraw in meshDraws {
+            guard let assetMesh = primaryAssetLibrary.mesh(for: meshDraw.assetID) else {
+                continue
+            }
+
+            let scale = SIMD3<Float>(
+                max(0.001, meshDraw.size.x / max(assetMesh.boundsSize.x, 0.001)),
+                max(0.001, meshDraw.size.y / max(assetMesh.boundsSize.y, 0.001)),
+                max(0.001, meshDraw.size.z / max(assetMesh.boundsSize.z, 0.001))
+            )
+            let modelMatrix =
+                makeMeshTranslationMatrix(meshDraw.position)
+                * makeMeshRotationMatrix(yaw: meshDraw.yaw, pitch: meshDraw.pitch, roll: meshDraw.roll)
+                * makeMeshScaleMatrix(scale)
+                * assetMesh.preTransform
+            let normalMatrix = makeNormalMatrix(from: modelMatrix)
+
+            for geometry in assetMesh.geometries {
+                encoder.setVertexBuffer(geometry.mesh.vertexBuffers[0].buffer, offset: geometry.mesh.vertexBuffers[0].offset, index: 0)
+                encoder.setVertexBuffer(worldUniformsBuffer, offset: 0, index: 1)
+
+                for part in geometry.parts {
+                    var meshUniforms = MeshInstanceUniforms(
+                        modelMatrix: modelMatrix,
+                        normalMatrix: normalMatrix,
+                        color: SIMD4<Float>(
+                            meshDraw.color.x * part.baseColor.x,
+                            meshDraw.color.y * part.baseColor.y,
+                            meshDraw.color.z * part.baseColor.z,
+                            meshDraw.color.w * part.baseColor.w
+                        ),
+                        lighting: meshDraw.lighting
+                    )
+                    memcpy(meshUniformsBuffer.contents(), &meshUniforms, MemoryLayout<MeshInstanceUniforms>.stride)
+
+                    encoder.setVertexBuffer(meshUniformsBuffer, offset: 0, index: 2)
+                    encoder.drawIndexedPrimitives(
+                        type: part.submesh.primitiveType,
+                        indexCount: part.submesh.indexCount,
+                        indexType: part.submesh.indexType,
+                        indexBuffer: part.submesh.indexBuffer.buffer,
+                        indexBufferOffset: part.submesh.indexBuffer.offset
+                    )
+                }
+            }
+        }
     }
 
     private func encodeOverlayInstances(_ instances: [RenderInstance], into encoder: MTLRenderCommandEncoder) {
@@ -522,6 +636,12 @@ final class GameRenderer: NSObject, MTKViewDelegate {
         var worldUniforms = makeWorldUniforms(camera: camera, drawableSize: drawableSize)
         var worldInstances: [World3DInstance] = []
         worldInstances.reserveCapacity(720)
+        var meshDraws: [FirstPersonMeshDraw] = []
+        meshDraws.reserveCapacity(240)
+        var viewmodelMeshDraws: [FirstPersonMeshDraw] = []
+        viewmodelMeshDraws.reserveCapacity(18)
+        var meshOccluders: [World3DInstance] = []
+        meshOccluders.reserveCapacity(240)
         var backdropInstances: [RenderInstance] = []
         backdropInstances.reserveCapacity(240)
         var overlayInstances: [RenderInstance] = []
@@ -558,13 +678,14 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             addFirstPersonTerrainWorld(to: &worldInstances, statePointer: statePointer)
             addFirstPersonStructuresWorld(to: &worldInstances, statePointer: statePointer)
             addFirstPersonInteractablesWorld(to: &worldInstances, statePointer: statePointer)
-            addFirstPersonItemsWorld(to: &worldInstances, statePointer: statePointer)
-            addFirstPersonTeammatesWorld(to: &worldInstances, statePointer: statePointer, playerPosition: playerPosition)
-            addFirstPersonEnemiesWorld(to: &worldInstances, statePointer: statePointer, playerPosition: playerPosition)
+            addFirstPersonItemsWorld(to: &worldInstances, meshDraws: &meshDraws, meshOccluders: &meshOccluders, statePointer: statePointer)
+            addFirstPersonTeammatesWorld(to: &worldInstances, meshDraws: &meshDraws, meshOccluders: &meshOccluders, statePointer: statePointer, playerPosition: playerPosition)
+            addFirstPersonEnemiesWorld(to: &worldInstances, meshDraws: &meshDraws, meshOccluders: &meshOccluders, statePointer: statePointer, playerPosition: playerPosition)
             addFirstPersonProjectilesWorld(to: &worldInstances, statePointer: statePointer)
+            let focusGeometry = worldInstances + meshOccluders
             addFirstPersonHorizonBackdrop(
                 to: &backdropInstances,
-                worldInstances: worldInstances,
+                worldInstances: focusGeometry,
                 camera: camera,
                 uniforms: worldUniforms
             )
@@ -574,7 +695,7 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             let aimSolution = solveFirstPersonAim(
                 camera: camera,
                 uniforms: worldUniforms,
-                worldInstances: worldInstances
+                worldInstances: focusGeometry
             )
                 ?? makeFallbackAimSolution(camera: camera, uniforms: worldUniforms)
             if let focusCue = solveFirstPersonFocusCue(
@@ -601,8 +722,11 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 sway: camera.sway,
                 aimPosition: aimSolution.screenPosition,
                 horizon: camera.horizon,
-                targetDepth: aimSolution.distanceGameUnits
-            )
+                targetDepth: aimSolution.distanceGameUnits,
+                camera: camera
+            ) { meshBatch in
+                viewmodelMeshDraws.append(contentsOf: meshBatch)
+            }
         }
 
         return FirstPersonWorldScene(
@@ -610,6 +734,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             worldUniforms: worldUniforms,
             backdropInstances: backdropInstances,
             worldInstances: worldInstances,
+            meshDraws: meshDraws,
+            viewmodelMeshDraws: viewmodelMeshDraws,
             overlayInstances: overlayInstances
         )
     }
@@ -1448,6 +1574,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     }
 
     private func addFirstPersonItemsWorld(to instances: inout [World3DInstance],
+                                          meshDraws: inout [FirstPersonMeshDraw],
+                                          meshOccluders: inout [World3DInstance],
                                           statePointer: UnsafePointer<GameState>) {
         let itemCount = Int(game_world_item_count(statePointer))
         for index in 0..<itemCount {
@@ -1460,23 +1588,95 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             let positionXZ = renderWorldPosition(worldPosition)
             let yaw = sinf(item.position.x * 0.014 + item.position.y * 0.01) * 0.8
             let pickupColor = fieldItemColor(item)
+            let itemName = string(fromTuple: item.name)
+            let pickupPosition = SIMD3<Float>(positionXZ.x, ground + 0.12, positionXZ.y)
 
             switch item.kind {
             case ItemKind_BulletBox:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.08, positionXZ.y), size: SIMD3<Float>(0.2, 0.16, 0.12), color: pickupColor)
+                appendPrimaryMesh(
+                    to: &meshDraws,
+                    meshOccluders: &meshOccluders,
+                    assetID: .ammoBox,
+                    position: pickupPosition,
+                    size: SIMD3<Float>(0.24, 0.12, 0.18),
+                    yaw: yaw * 0.6,
+                    roll: 0.24,
+                    color: mixedColor(pickupColor, SIMD4<Float>(0.94, 0.9, 0.72, 1.0), amount: 0.18)
+                )
             case ItemKind_Magazine:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.14, positionXZ.y), size: SIMD3<Float>(0.08, 0.28, 0.12), color: pickupColor, yaw: yaw)
+                appendPrimaryMesh(
+                    to: &meshDraws,
+                    meshOccluders: &meshOccluders,
+                    assetID: .magazine,
+                    position: SIMD3<Float>(positionXZ.x, ground + 0.11, positionXZ.y),
+                    size: SIMD3<Float>(0.08, 0.16, 0.22),
+                    yaw: yaw,
+                    roll: 0.36,
+                    color: mixedColor(pickupColor, SIMD4<Float>(0.96, 0.82, 0.54, 1.0), amount: 0.22)
+                )
             case ItemKind_Gun:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.06, positionXZ.y), size: SIMD3<Float>(0.36, 0.08, 0.14), color: pickupColor, yaw: yaw)
+                let weaponAsset = primaryWeaponAsset(for: itemName, weaponClass: item.weaponClass)
+                let weaponSize = primaryWeaponSize(for: weaponAsset)
+                appendPrimaryWeaponMesh(
+                    to: &meshDraws,
+                    meshOccluders: &meshOccluders,
+                    assetID: weaponAsset,
+                    position: SIMD3<Float>(positionXZ.x, ground + 0.08, positionXZ.y),
+                    size: weaponSize,
+                    yaw: yaw,
+                    roll: 0.08,
+                    color: mixedColor(pickupColor, SIMD4<Float>(0.92, 0.96, 0.98, 1.0), amount: 0.12),
+                    suppressed: item.suppressed,
+                    opticMounted: item.opticMounted,
+                    laserMounted: item.laserMounted,
+                    lightMounted: item.lightMounted,
+                    underbarrelMounted: item.underbarrelMounted
+                )
             case ItemKind_Blade:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.2, positionXZ.y), size: SIMD3<Float>(0.04, 0.4, 0.08), color: pickupColor, yaw: yaw)
+                appendPrimaryMesh(
+                    to: &meshDraws,
+                    meshOccluders: &meshOccluders,
+                    assetID: .fieldKnife,
+                    position: SIMD3<Float>(positionXZ.x, ground + 0.12, positionXZ.y),
+                    size: SIMD3<Float>(0.08, 0.08, 0.46),
+                    yaw: yaw,
+                    roll: -0.42,
+                    color: mixedColor(pickupColor, SIMD4<Float>(0.96, 0.97, 0.98, 1.0), amount: 0.22)
+                )
             case ItemKind_Attachment:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.08, positionXZ.y), size: SIMD3<Float>(0.16, 0.14, 0.12), color: pickupColor, yaw: yaw)
+                let attachmentAsset = primaryAttachmentAsset(for: itemName, suppressed: item.suppressed)
+                appendPrimaryMesh(
+                    to: &meshDraws,
+                    meshOccluders: &meshOccluders,
+                    assetID: attachmentAsset,
+                    position: SIMD3<Float>(positionXZ.x, ground + 0.11, positionXZ.y),
+                    size: primaryAttachmentSize(for: attachmentAsset),
+                    yaw: yaw,
+                    roll: attachmentAsset == .verticalGrip ? 0.22 : 0,
+                    color: mixedColor(pickupColor, SIMD4<Float>(0.94, 0.96, 0.9, 1.0), amount: 0.16)
+                )
             case ItemKind_Medkit:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.1, positionXZ.y), size: SIMD3<Float>(0.18, 0.18, 0.18), color: pickupColor)
+                appendPrimaryMesh(
+                    to: &meshDraws,
+                    meshOccluders: &meshOccluders,
+                    assetID: .medkit,
+                    position: SIMD3<Float>(positionXZ.x, ground + 0.12, positionXZ.y),
+                    size: SIMD3<Float>(0.22, 0.16, 0.2),
+                    yaw: yaw * 0.5,
+                    color: mixedColor(pickupColor, SIMD4<Float>(0.98, 0.94, 0.92, 1.0), amount: 0.08)
+                )
             case ItemKind_Objective:
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.12, positionXZ.y), size: SIMD3<Float>(0.16, 0.24, 0.16), color: pickupColor)
-                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.82, positionXZ.y), size: SIMD3<Float>(0.05, 1.05, 0.05), color: mixedColor(pickupColor, SIMD4<Float>(1.0, 0.94, 0.58, 0.94), amount: 0.42), lighting: 1.08)
+                appendPrimaryMesh(
+                    to: &meshDraws,
+                    meshOccluders: &meshOccluders,
+                    assetID: .objective,
+                    position: SIMD3<Float>(positionXZ.x, ground + 0.16, positionXZ.y),
+                    size: SIMD3<Float>(0.28, 0.08, 0.28),
+                    yaw: yaw * 0.3,
+                    color: mixedColor(pickupColor, SIMD4<Float>(1.0, 0.95, 0.72, 1.0), amount: 0.32),
+                    lighting: 1.04
+                )
+                appendWorldBox(to: &instances, position: SIMD3<Float>(positionXZ.x, ground + 0.84, positionXZ.y), size: SIMD3<Float>(0.05, 1.08, 0.05), color: mixedColor(pickupColor, SIMD4<Float>(1.0, 0.94, 0.58, 0.94), amount: 0.42), lighting: 1.08)
             default:
                 break
             }
@@ -1484,6 +1684,8 @@ final class GameRenderer: NSObject, MTKViewDelegate {
     }
 
     private func addFirstPersonTeammatesWorld(to instances: inout [World3DInstance],
+                                              meshDraws: inout [FirstPersonMeshDraw],
+                                              meshOccluders: inout [World3DInstance],
                                               statePointer: UnsafePointer<GameState>,
                                               playerPosition: SIMD2<Float>) {
         let teammateCount = Int(game_teammate_count(statePointer))
@@ -1499,37 +1701,62 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             let flash: Float = teammate.hitTimer > 0 ? 0.18 : 0.0
             let yaw = atan2f(playerPosition.x - teammate.position.x, playerPosition.y - teammate.position.y)
             let bodyColor = teammate.downed
-                ? SIMD4<Float>(0.34, 0.22, 0.2, 0.76)
-                : SIMD4<Float>(0.22, 0.66 + flash, 0.52 + 0.24 * healthFactor, 0.98)
+                ? SIMD4<Float>(0.44, 0.36, 0.34, 0.94)
+                : SIMD4<Float>(0.48 + flash * 0.1, 0.92, 0.76 + 0.12 * healthFactor, 0.98)
+            let characterAsset: PrimaryAssetID = index.isMultiple(of: 2) ? .characterMatt : .characterSam
+            let basePosition = SIMD3<Float>(positionXZ.x, ground + 0.02, positionXZ.y)
 
-            appendWorldBox(
-                to: &instances,
-                position: SIMD3<Float>(positionXZ.x, ground + (teammate.downed ? 0.52 : 0.86), positionXZ.y),
-                size: SIMD3<Float>(0.32, teammate.downed ? 0.44 : 1.08, 0.22),
-                color: bodyColor,
-                yaw: yaw
-            )
-            appendWorldBox(
-                to: &instances,
-                position: SIMD3<Float>(positionXZ.x, ground + (teammate.downed ? 0.68 : 1.58), positionXZ.y),
-                size: SIMD3<Float>(0.22, teammate.downed ? 0.16 : 0.24, 0.22),
-                color: bodyColor,
-                yaw: yaw,
-                lighting: 0.96
-            )
-            if !teammate.downed {
-                appendWorldBox(
-                    to: &instances,
-                    position: SIMD3<Float>(positionXZ.x + 0.08 * sinf(yaw), ground + 1.04, positionXZ.y + 0.08 * cosf(yaw)),
-                    size: SIMD3<Float>(0.08, 0.08, 0.32),
-                    color: SIMD4<Float>(0.16, 0.2, 0.2, 0.98),
-                    yaw: yaw
+            if teammate.downed {
+                appendPrimaryMesh(
+                    to: &meshDraws,
+                    meshOccluders: &meshOccluders,
+                    assetID: characterAsset,
+                    position: basePosition + SIMD3<Float>(0, 0.26, 0),
+                    size: SIMD3<Float>(0.94, 0.36, 0.48),
+                    yaw: yaw,
+                    pitch: .pi * 0.5,
+                    color: bodyColor,
+                    lighting: 0.92
                 )
+                continue
             }
+
+            appendPrimaryMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: characterAsset,
+                position: basePosition,
+                size: SIMD3<Float>(0.54, 1.74, 0.5),
+                yaw: yaw,
+                color: bodyColor
+            )
+            appendPrimaryMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: .backpack,
+                position: basePosition + rotateLocalOffset(SIMD3<Float>(0, 1.02, -0.1), yaw: yaw),
+                size: SIMD3<Float>(0.22, 0.34, 0.16),
+                yaw: yaw,
+                color: SIMD4<Float>(0.42, 0.5, 0.36, 0.98),
+                lighting: 0.94
+            )
+            appendPrimaryWeaponMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: index.isMultiple(of: 2) ? .assaultRifle : .bullpup,
+                position: basePosition + rotateLocalOffset(SIMD3<Float>(0.12, 1.08, 0.1), yaw: yaw),
+                size: SIMD3<Float>(0.18, 0.16, 0.88),
+                yaw: yaw,
+                roll: 0.04,
+                color: SIMD4<Float>(0.24, 0.28, 0.3, 0.98),
+                opticMounted: true
+            )
         }
     }
 
     private func addFirstPersonEnemiesWorld(to instances: inout [World3DInstance],
+                                            meshDraws: inout [FirstPersonMeshDraw],
+                                            meshOccluders: inout [World3DInstance],
                                             statePointer: UnsafePointer<GameState>,
                                             playerPosition: SIMD2<Float>) {
         let enemyCount = Int(game_enemy_count(statePointer))
@@ -1544,29 +1771,40 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             let healthFactor = max(0.22, enemy.health / 100)
             let flash: Float = enemy.hitTimer > 0 ? 0.22 : 0.0
             let yaw = atan2f(playerPosition.x - enemy.position.x, playerPosition.y - enemy.position.y)
-            let bodyColor = SIMD4<Float>(0.72 + flash, 0.2 + (0.28 * healthFactor), 0.15, 0.98)
+            let bodyColor = SIMD4<Float>(0.92, 0.44 + 0.18 * healthFactor, 0.34 + flash * 0.14, 0.98)
+            let characterAsset: PrimaryAssetID = index.isMultiple(of: 2) ? .characterShaun : .characterLis
+            let basePosition = SIMD3<Float>(positionXZ.x, ground + 0.02, positionXZ.y)
 
-            appendWorldBox(
-                to: &instances,
-                position: SIMD3<Float>(positionXZ.x, ground + 0.88, positionXZ.y),
-                size: SIMD3<Float>(0.34, enemy.fallingBack ? 1.02 : 1.16, 0.22),
-                color: bodyColor,
-                yaw: yaw
-            )
-            appendWorldBox(
-                to: &instances,
-                position: SIMD3<Float>(positionXZ.x, ground + 1.62, positionXZ.y),
-                size: SIMD3<Float>(0.22, 0.26, 0.22),
-                color: bodyColor,
+            appendPrimaryMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: characterAsset,
+                position: basePosition,
+                size: SIMD3<Float>(0.56, enemy.fallingBack ? 1.62 : 1.74, 0.52),
                 yaw: yaw,
-                lighting: 0.96
+                color: bodyColor,
+                lighting: enemy.fallingBack ? 0.94 : 1.0
             )
-            appendWorldBox(
-                to: &instances,
-                position: SIMD3<Float>(positionXZ.x + 0.08 * sinf(yaw), ground + 1.08, positionXZ.y + 0.08 * cosf(yaw)),
-                size: SIMD3<Float>(0.08, 0.08, 0.34),
-                color: SIMD4<Float>(0.16, 0.16, 0.16, 0.98),
-                yaw: yaw
+            appendPrimaryMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: .backpack,
+                position: basePosition + rotateLocalOffset(SIMD3<Float>(0, 1.0, -0.1), yaw: yaw),
+                size: SIMD3<Float>(0.2, 0.32, 0.16),
+                yaw: yaw,
+                color: SIMD4<Float>(0.3, 0.22, 0.16, 0.98),
+                lighting: 0.9
+            )
+            appendPrimaryWeaponMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: index.isMultiple(of: 2) ? .marksmanRifle : .submachineGun,
+                position: basePosition + rotateLocalOffset(SIMD3<Float>(0.12, 1.1, 0.12), yaw: yaw),
+                size: index.isMultiple(of: 2) ? SIMD3<Float>(0.16, 0.16, 0.92) : SIMD3<Float>(0.16, 0.16, 0.72),
+                yaw: yaw,
+                roll: 0.02,
+                color: SIMD4<Float>(0.24, 0.24, 0.26, 0.98),
+                opticMounted: index.isMultiple(of: 2)
             )
         }
     }
@@ -3335,7 +3573,9 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                                     sway: Float,
                                     aimPosition: SIMD2<Float>,
                                     horizon: Float,
-                                    targetDepth: Float) {
+                                    targetDepth: Float,
+                                    camera: FirstPersonCameraRig? = nil,
+                                    appendViewmodelMeshDraws: (([FirstPersonMeshDraw]) -> Void)? = nil) {
         let selectedIndex = Int(game_selected_inventory_index(statePointer))
         guard selectedIndex >= 0, let selectedItem = game_inventory_item_at(statePointer, selectedIndex)?.pointee else {
             return
@@ -3376,38 +3616,22 @@ final class GameRenderer: NSObject, MTKViewDelegate {
 
         switch selectedItem.kind {
         case ItemKind_Gun:
-            let weaponColor = SIMD4<Float>(0.32, 0.35, 0.37, 0.98)
-            let accentColor = SIMD4<Float>(0.16, 0.17, 0.18, 0.96)
             let receiverBase = base + SIMD2<Float>(-reloadTilt * 0.08, reloadDrop * 0.04)
-            let handguardBase = receiverBase + SIMD2<Float>(0.19, -0.04) + SIMD2<Float>(walkSway * 0.08, -viewmodelKick * 0.05 - reloadTilt * 0.02)
-            let magazineBase = receiverBase + SIMD2<Float>(-0.1, 0.08) + SIMD2<Float>(-walkSway * 0.06, walkLift * 0.04)
-            let reloadMagazineOffset = SIMD2<Float>(-0.18 * viewmodelReloadTransition + reloadProgress * 0.14, 0.16 * viewmodelReloadTransition + reloadPulse * 0.07)
-            let supportMagazineOffset = SIMD2<Float>(-0.26 * viewmodelReloadTransition + reloadProgress * 0.18, 0.24 * viewmodelReloadTransition - reloadPulse * 0.08)
-            instances.append(makeInstance(position: receiverBase, size: SIMD2<Float>(0.52, 0.14), color: weaponColor, rotation: weaponRotation, shape: .rectangle))
-            instances.append(makeInstance(position: handguardBase, size: SIMD2<Float>(0.34, 0.05), color: accentColor, rotation: weaponRotation + 0.03 - reloadTilt * 0.12, shape: .rectangle))
-            instances.append(makeInstance(position: magazineBase + reloadMagazineOffset, size: SIMD2<Float>(0.12, 0.18), color: accentColor, rotation: 0.2 + viewmodelRoll * 0.55 - reloadTilt * 0.54, shape: .rectangle))
-
-            if viewmodelReloadTransition > 0.02 {
-                instances.append(
-                    makeInstance(
-                        position: receiverBase + supportMagazineOffset,
-                        size: SIMD2<Float>(0.11, 0.17),
-                        color: SIMD4<Float>(0.22, 0.24, 0.26, 0.9),
-                        rotation: 0.34 - reloadTilt * 0.22,
-                        shape: .rectangle
+            if let camera, let appendViewmodelMeshDraws {
+                appendViewmodelMeshDraws(
+                    makeHeldWeaponMeshDraws(
+                        selectedItem: selectedItem,
+                        camera: camera,
+                        recoil: recoil,
+                        walkSway: walkSway,
+                        walkLift: walkLift,
+                        swapDrop: swapDrop,
+                        reloadDrop: reloadDrop,
+                        reloadTilt: reloadTilt
                     )
                 )
             }
-
-            if selectedItem.opticMounted {
-                instances.append(makeInstance(position: receiverBase + SIMD2<Float>(0.02, -0.1 - reloadTilt * 0.02), size: SIMD2<Float>(0.12, 0.07), color: SIMD4<Float>(0.22, 0.25, 0.28, 0.96), rotation: weaponRotation * 0.18, shape: .rectangle))
-                instances.append(makeInstance(position: receiverBase + SIMD2<Float>(0.14, -0.1 - reloadTilt * 0.02), size: SIMD2<Float>(0.08, 0.07), color: SIMD4<Float>(0.12, 0.14, 0.16, 0.96), rotation: weaponRotation * 0.18, shape: .rectangle))
-            }
-            if selectedItem.suppressed {
-                instances.append(makeInstance(position: receiverBase + SIMD2<Float>(0.39, -0.04), size: SIMD2<Float>(0.14, 0.04), color: SIMD4<Float>(0.17, 0.18, 0.2, 0.94), rotation: weaponRotation + 0.03, shape: .rectangle))
-            }
             if selectedItem.laserMounted {
-                instances.append(makeInstance(position: receiverBase + SIMD2<Float>(0.1, -0.005), size: SIMD2<Float>(0.08, 0.04), color: SIMD4<Float>(0.18, 0.24, 0.18, 0.94), rotation: weaponRotation * 0.2, shape: .rectangle))
                 let laserEmitter = receiverBase + SIMD2<Float>(0.18, -0.02)
                 let laserTarget = aimPosition
                 let beamVector = laserTarget - laserEmitter
@@ -3421,15 +3645,11 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 instances.append(makeInstance(position: laserTarget, size: SIMD2<Float>(laserDotSize, laserDotSize), color: SIMD4<Float>(0.98, 0.2, 0.18, 0.72), rotation: 0, shape: .circle))
             }
             if selectedItem.lightMounted {
-                instances.append(makeInstance(position: receiverBase + SIMD2<Float>(0.13, 0.038), size: SIMD2<Float>(0.06, 0.03), color: SIMD4<Float>(0.72, 0.76, 0.68, 0.96), rotation: 0, shape: .rectangle))
                 let beamCenter = SIMD2<Float>(aimPosition.x, max(horizon + 0.14, aimPosition.y + 0.1))
                 let hotspotSize = max(0.12, 0.34 - min(targetDepth / 2600.0, 0.12))
                 instances.append(makeInstance(position: beamCenter + SIMD2<Float>(0, 0.08), size: SIMD2<Float>(0.92, 0.26), color: SIMD4<Float>(0.92, 0.9, 0.72, 0.06), rotation: 0, shape: .rectangle))
                 instances.append(makeInstance(position: beamCenter + SIMD2<Float>(0, 0.02), size: SIMD2<Float>(0.56, 0.18), color: SIMD4<Float>(0.96, 0.94, 0.76, 0.09), rotation: 0, shape: .rectangle))
                 instances.append(makeInstance(position: aimPosition, size: SIMD2<Float>(hotspotSize, hotspotSize), color: SIMD4<Float>(0.98, 0.96, 0.84, 0.1), rotation: 0, shape: .circle))
-            }
-            if selectedItem.underbarrelMounted {
-                instances.append(makeInstance(position: receiverBase + SIMD2<Float>(0.03, 0.1), size: SIMD2<Float>(0.06, 0.12), color: SIMD4<Float>(0.2, 0.22, 0.22, 0.96), rotation: 0.02 + viewmodelRoll * 0.2, shape: .rectangle))
             }
 
             if muzzleFlashIntensity > 0.02 {
@@ -3765,6 +3985,370 @@ final class GameRenderer: NSObject, MTKViewDelegate {
                 color: color
             )
         )
+    }
+
+    private func appendPrimaryMesh(to meshDraws: inout [FirstPersonMeshDraw],
+                                   meshOccluders: inout [World3DInstance],
+                                   assetID: PrimaryAssetID,
+                                   position: SIMD3<Float>,
+                                   size: SIMD3<Float>,
+                                   yaw: Float,
+                                   pitch: Float = 0,
+                                   roll: Float = 0,
+                                   color: SIMD4<Float>,
+                                   lighting: Float = 1.0) {
+        let clampedSize = SIMD3<Float>(max(0.04, size.x), max(0.04, size.y), max(0.04, size.z))
+        meshDraws.append(
+            FirstPersonMeshDraw(
+                assetID: assetID,
+                position: position,
+                size: clampedSize,
+                yaw: yaw,
+                pitch: pitch,
+                roll: roll,
+                color: color,
+                lighting: lighting
+            )
+        )
+        meshOccluders.append(
+            World3DInstance(
+                position: position,
+                yaw: yaw,
+                size: SIMD3<Float>(max(0.06, clampedSize.x), max(0.06, clampedSize.y), max(0.06, clampedSize.z)),
+                lighting: lighting,
+                color: color
+            )
+        )
+    }
+
+    private func appendPrimaryWeaponMesh(to meshDraws: inout [FirstPersonMeshDraw],
+                                         meshOccluders: inout [World3DInstance],
+                                         assetID: PrimaryAssetID,
+                                         position: SIMD3<Float>,
+                                         size: SIMD3<Float>,
+                                         yaw: Float,
+                                         pitch: Float = 0,
+                                         roll: Float = 0,
+                                         color: SIMD4<Float>,
+                                         lighting: Float = 1.0,
+                                         suppressed: Bool = false,
+                                         opticMounted: Bool = false,
+                                         laserMounted: Bool = false,
+                                         lightMounted: Bool = false,
+                                         underbarrelMounted: Bool = false) {
+        appendPrimaryMesh(
+            to: &meshDraws,
+            meshOccluders: &meshOccluders,
+            assetID: assetID,
+            position: position,
+            size: size,
+            yaw: yaw,
+            pitch: pitch,
+            roll: roll,
+            color: color,
+            lighting: lighting
+        )
+
+        let accentColor = mixedColor(color, SIMD4<Float>(0.95, 0.94, 0.9, 1.0), amount: 0.18)
+        let length = size.z
+        let height = size.y
+        let width = size.x
+
+        if opticMounted {
+            appendPrimaryMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: .optic,
+                position: position + rotateLocalOffset(SIMD3<Float>(0, height * 0.42, length * 0.04), yaw: yaw, pitch: pitch, roll: roll),
+                size: SIMD3<Float>(0.14, 0.08, 0.18),
+                yaw: yaw,
+                pitch: pitch,
+                roll: roll,
+                color: accentColor,
+                lighting: lighting * 1.02
+            )
+        }
+
+        if suppressed {
+            appendPrimaryMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: .suppressor,
+                position: position + rotateLocalOffset(SIMD3<Float>(0, 0, length * 0.56), yaw: yaw, pitch: pitch, roll: roll),
+                size: SIMD3<Float>(0.06, 0.06, 0.22),
+                yaw: yaw,
+                pitch: pitch,
+                roll: roll,
+                color: SIMD4<Float>(0.28, 0.29, 0.31, color.w),
+                lighting: lighting * 0.98
+            )
+        }
+
+        if laserMounted {
+            appendPrimaryMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: .laserModule,
+                position: position + rotateLocalOffset(SIMD3<Float>(width * 0.18, height * 0.1, length * 0.08), yaw: yaw, pitch: pitch, roll: roll),
+                size: SIMD3<Float>(0.08, 0.05, 0.1),
+                yaw: yaw,
+                pitch: pitch,
+                roll: roll,
+                color: SIMD4<Float>(0.42, 0.54, 0.38, 0.98),
+                lighting: lighting
+            )
+        }
+
+        if lightMounted {
+            appendPrimaryMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: .weaponLight,
+                position: position + rotateLocalOffset(SIMD3<Float>(-width * 0.2, -height * 0.02, length * 0.12), yaw: yaw, pitch: pitch, roll: roll),
+                size: SIMD3<Float>(0.08, 0.05, 0.12),
+                yaw: yaw,
+                pitch: pitch,
+                roll: roll,
+                color: SIMD4<Float>(0.78, 0.8, 0.72, 0.98),
+                lighting: lighting * 1.02
+            )
+        }
+
+        if underbarrelMounted {
+            appendPrimaryMesh(
+                to: &meshDraws,
+                meshOccluders: &meshOccluders,
+                assetID: .verticalGrip,
+                position: position + rotateLocalOffset(SIMD3<Float>(0, -height * 0.4, length * 0.06), yaw: yaw, pitch: pitch, roll: roll),
+                size: SIMD3<Float>(0.08, 0.1, 0.1),
+                yaw: yaw,
+                pitch: pitch,
+                roll: roll,
+                color: SIMD4<Float>(0.3, 0.32, 0.32, 0.98),
+                lighting: lighting
+            )
+        }
+    }
+
+    private func primaryWeaponAsset(for itemName: String, weaponClass: WeaponClass) -> PrimaryAssetID {
+        let normalized = itemName.lowercased()
+        if normalized.contains("vx-9") {
+            return .bullpup
+        }
+        if normalized.contains("recon") || normalized.contains("scout") {
+            return .marksmanRifle
+        }
+        if normalized.contains("m17") || weaponClass == WeaponClass_Pistol {
+            return .sidearm
+        }
+        if weaponClass == WeaponClass_Carbine {
+            return .assaultRifle
+        }
+        if weaponClass == WeaponClass_Knife {
+            return .fieldKnife
+        }
+        return .marksmanRifle
+    }
+
+    private func primaryWeaponSize(for assetID: PrimaryAssetID) -> SIMD3<Float> {
+        switch assetID {
+        case .sidearm:
+            return SIMD3<Float>(0.1, 0.14, 0.42)
+        case .submachineGun:
+            return SIMD3<Float>(0.14, 0.16, 0.72)
+        case .bullpup:
+            return SIMD3<Float>(0.16, 0.18, 0.82)
+        case .marksmanRifle:
+            return SIMD3<Float>(0.14, 0.16, 0.92)
+        default:
+            return SIMD3<Float>(0.16, 0.16, 0.86)
+        }
+    }
+
+    private func heldWeaponSize(for assetID: PrimaryAssetID) -> SIMD3<Float> {
+        switch assetID {
+        case .sidearm:
+            return SIMD3<Float>(0.18, 0.18, 0.56)
+        case .submachineGun:
+            return SIMD3<Float>(0.22, 0.2, 0.92)
+        case .bullpup:
+            return SIMD3<Float>(0.24, 0.22, 1.0)
+        case .marksmanRifle:
+            return SIMD3<Float>(0.22, 0.22, 1.12)
+        default:
+            return SIMD3<Float>(0.24, 0.22, 1.04)
+        }
+    }
+
+    private func makeHeldWeaponMeshDraws(selectedItem: InventoryItem,
+                                         camera: FirstPersonCameraRig,
+                                         recoil: Float,
+                                         walkSway: Float,
+                                         walkLift: Float,
+                                         swapDrop: Float,
+                                         reloadDrop: Float,
+                                         reloadTilt: Float) -> [FirstPersonMeshDraw] {
+        let itemName = string(fromTuple: selectedItem.name)
+        let assetID = primaryWeaponAsset(for: itemName, weaponClass: selectedItem.weaponClass)
+        let opticAlignment: Float = selectedItem.opticMounted ? 1.0 : 0.0
+        let forwardLength = max(0.001, simd_length(SIMD2<Float>(camera.forward.x, camera.forward.z)))
+        var localPosition = SIMD3<Float>(
+            0.28 - opticAlignment * 0.1 + walkSway * 0.14 + viewmodelDrift * 0.24 - reloadTilt * 0.08,
+            -0.2 - walkLift * 0.42 - recoil * 0.24 - swapDrop * 0.12 - reloadDrop * 0.14 + opticAlignment * 0.04,
+            0.56 - recoil * 0.18 + opticAlignment * 0.05 - swapDrop * 0.08
+        )
+        var yaw = atan2f(camera.forward.x, camera.forward.z) - 0.18 + walkSway * 0.08 - reloadTilt * 0.06
+        var pitch = -atan2f(camera.forward.y, forwardLength) - 0.22 + recoil * 0.06 + reloadTilt * 0.14
+        var roll = 0.34 + viewmodelRoll * 0.92 + walkSway * 0.48 - reloadTilt * 0.82 + swapDrop * 0.08
+
+        switch assetID {
+        case .sidearm:
+            localPosition += SIMD3<Float>(0.09, -0.04, -0.08)
+            yaw += 0.08
+            pitch += 0.04
+            roll -= 0.08
+        case .bullpup:
+            localPosition += SIMD3<Float>(-0.03, 0.01, -0.02)
+        case .marksmanRifle:
+            localPosition += SIMD3<Float>(-0.04, 0.02, 0.05)
+            pitch -= 0.03
+        case .submachineGun:
+            localPosition += SIMD3<Float>(0.02, -0.01, -0.04)
+            roll += 0.03
+        default:
+            break
+        }
+
+        let position = camera.position
+            + camera.right * localPosition.x
+            + camera.up * localPosition.y
+            + camera.forward * localPosition.z
+        let bodyColor = mixedColor(
+            SIMD4<Float>(0.26, 0.28, 0.3, 0.98),
+            SIMD4<Float>(0.9, 0.92, 0.94, 0.98),
+            amount: 0.08
+        )
+
+        var meshDraws: [FirstPersonMeshDraw] = []
+        meshDraws.reserveCapacity(6)
+        var ignoredOccluders: [World3DInstance] = []
+        appendPrimaryWeaponMesh(
+            to: &meshDraws,
+            meshOccluders: &ignoredOccluders,
+            assetID: assetID,
+            position: position,
+            size: heldWeaponSize(for: assetID),
+            yaw: yaw,
+            pitch: pitch,
+            roll: roll,
+            color: bodyColor,
+            lighting: 1.08,
+            suppressed: selectedItem.suppressed,
+            opticMounted: selectedItem.opticMounted,
+            laserMounted: selectedItem.laserMounted,
+            lightMounted: selectedItem.lightMounted,
+            underbarrelMounted: selectedItem.underbarrelMounted
+        )
+        return meshDraws
+    }
+
+    private func primaryAttachmentAsset(for itemName: String, suppressed: Bool) -> PrimaryAssetID {
+        let normalized = itemName.lowercased()
+        if suppressed || normalized.contains("suppressor") {
+            return .suppressor
+        }
+        if normalized.contains("laser") {
+            return .laserModule
+        }
+        if normalized.contains("light") {
+            return .weaponLight
+        }
+        if normalized.contains("grip") {
+            return .verticalGrip
+        }
+        return .optic
+    }
+
+    private func primaryAttachmentSize(for assetID: PrimaryAssetID) -> SIMD3<Float> {
+        switch assetID {
+        case .suppressor:
+            return SIMD3<Float>(0.08, 0.06, 0.22)
+        case .weaponLight:
+            return SIMD3<Float>(0.08, 0.06, 0.14)
+        case .verticalGrip:
+            return SIMD3<Float>(0.08, 0.1, 0.08)
+        case .laserModule:
+            return SIMD3<Float>(0.08, 0.06, 0.1)
+        default:
+            return SIMD3<Float>(0.14, 0.08, 0.18)
+        }
+    }
+
+    private func rotateLocalOffset(_ offset: SIMD3<Float>,
+                                   yaw: Float,
+                                   pitch: Float = 0,
+                                   roll: Float = 0) -> SIMD3<Float> {
+        let rotated = makeMeshRotationMatrix(yaw: yaw, pitch: pitch, roll: roll) * SIMD4<Float>(offset, 0)
+        return SIMD3<Float>(rotated.x, rotated.y, rotated.z)
+    }
+
+    private func makeMeshTranslationMatrix(_ translation: SIMD3<Float>) -> simd_float4x4 {
+        simd_float4x4(
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(translation.x, translation.y, translation.z, 1)
+        )
+    }
+
+    private func makeMeshScaleMatrix(_ scale: SIMD3<Float>) -> simd_float4x4 {
+        simd_float4x4(
+            SIMD4<Float>(scale.x, 0, 0, 0),
+            SIMD4<Float>(0, scale.y, 0, 0),
+            SIMD4<Float>(0, 0, scale.z, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+    }
+
+    private func makeMeshRotationMatrix(yaw: Float,
+                                        pitch: Float,
+                                        roll: Float) -> simd_float4x4 {
+        let sx = sinf(pitch)
+        let cx = cosf(pitch)
+        let sy = sinf(yaw)
+        let cy = cosf(yaw)
+        let sz = sinf(roll)
+        let cz = cosf(roll)
+
+        let rotateX = simd_float4x4(
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, cx, sx, 0),
+            SIMD4<Float>(0, -sx, cx, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+        let rotateY = simd_float4x4(
+            SIMD4<Float>(cy, 0, -sy, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(sy, 0, cy, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+        let rotateZ = simd_float4x4(
+            SIMD4<Float>(cz, sz, 0, 0),
+            SIMD4<Float>(-sz, cz, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+
+        return rotateY * rotateX * rotateZ
+    }
+
+    private func makeNormalMatrix(from modelMatrix: simd_float4x4) -> simd_float3x3 {
+        let upperLeft = simd_float3x3(
+            SIMD3<Float>(modelMatrix.columns.0.x, modelMatrix.columns.0.y, modelMatrix.columns.0.z),
+            SIMD3<Float>(modelMatrix.columns.1.x, modelMatrix.columns.1.y, modelMatrix.columns.1.z),
+            SIMD3<Float>(modelMatrix.columns.2.x, modelMatrix.columns.2.y, modelMatrix.columns.2.z)
+        )
+        return upperLeft.inverse.transpose
     }
 
     private func renderWorldPosition(_ worldPosition: SIMD2<Float>) -> SIMD2<Float> {
@@ -4118,6 +4702,15 @@ final class GameRenderer: NSObject, MTKViewDelegate {
             return SIMD4<Float>(0.86, 0.76, 0.28, 0.99)
         default:
             return SIMD4<Float>(0.52, 0.56, 0.52, 0.96)
+        }
+    }
+
+    private func string<T>(fromTuple tuple: T) -> String {
+        withUnsafeBytes(of: tuple) { rawBuffer in
+            guard let baseAddress = rawBuffer.bindMemory(to: CChar.self).baseAddress else {
+                return ""
+            }
+            return String(cString: baseAddress)
         }
     }
 }

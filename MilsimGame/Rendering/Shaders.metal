@@ -27,6 +27,11 @@ struct World3DVertex {
     float3 normal;
 };
 
+struct MeshVertexIn {
+    float3 position [[attribute(0)]];
+    float3 normal [[attribute(1)]];
+};
+
 struct World3DInstance {
     float3 position;
     float yaw;
@@ -46,6 +51,14 @@ struct World3DUniforms {
     float4 ambientColor;
     float4 shadowColor;
     float4 hazeColor;
+};
+
+struct MeshInstanceUniforms {
+    float4x4 modelMatrix;
+    float3x3 normalMatrix;
+    float4 color;
+    float lighting;
+    float3 padding;
 };
 
 struct World3DRasterizerData {
@@ -132,6 +145,26 @@ vertex World3DRasterizerData firstPersonWorldVertex(uint vertexID [[vertex_id]],
     out.fogAmount = smoothstep(uniforms.fogStart, uniforms.fogEnd, distanceToCamera);
     out.worldPosition = worldPosition;
     out.viewFacing = clamp(dot(rotatedNormal, viewDirection), 0.0, 1.0);
+    return out;
+}
+
+vertex World3DRasterizerData firstPersonMeshVertex(MeshVertexIn in [[stage_in]],
+                                                   constant World3DUniforms &uniforms [[buffer(1)]],
+                                                   constant MeshInstanceUniforms &instance [[buffer(2)]]) {
+    World3DRasterizerData out;
+    float4 localPosition = float4(in.position, 1.0);
+    float3 worldPosition = (instance.modelMatrix * localPosition).xyz;
+    float3 worldNormal = normalize(instance.normalMatrix * in.normal);
+
+    float distanceToCamera = distance(worldPosition, uniforms.cameraPosition);
+    float3 viewDirection = normalize(uniforms.cameraPosition - worldPosition);
+
+    out.position = uniforms.viewProjectionMatrix * float4(worldPosition, 1.0);
+    out.normal = worldNormal;
+    out.color = float4(instance.color.rgb * instance.lighting, instance.color.a);
+    out.fogAmount = smoothstep(uniforms.fogStart, uniforms.fogEnd, distanceToCamera);
+    out.worldPosition = worldPosition;
+    out.viewFacing = clamp(dot(worldNormal, viewDirection), 0.0, 1.0);
     return out;
 }
 

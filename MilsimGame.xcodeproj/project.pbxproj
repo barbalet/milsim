@@ -18,6 +18,8 @@
 		A10000010000000000000009 /* ItemDefinitions.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000014 /* ItemDefinitions.json */; };
 		A10000010000000000000010 /* MissionLootTables.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000015 /* MissionLootTables.json */; };
 		A10000010000000000000011 /* MissionScripts.json in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000016 /* MissionScripts.json */; };
+		A10000010000000000000012 /* PrimaryAssetLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000017 /* PrimaryAssetLibrary.swift */; };
+		A10000010000000000000013 /* PrimaryAssets in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000018 /* PrimaryAssets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +40,8 @@
 		B10000010000000000000014 /* ItemDefinitions.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = ItemDefinitions.json; sourceTree = "<group>"; };
 		B10000010000000000000015 /* MissionLootTables.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = MissionLootTables.json; sourceTree = "<group>"; };
 		B10000010000000000000016 /* MissionScripts.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = MissionScripts.json; sourceTree = "<group>"; };
+		B10000010000000000000017 /* PrimaryAssetLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryAssetLibrary.swift; sourceTree = "<group>"; };
+		B10000010000000000000018 /* PrimaryAssets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PrimaryAssets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -70,6 +74,7 @@
 				C10000010000000000000005 /* Rendering */,
 				C10000010000000000000006 /* Engine */,
 				C10000010000000000000007 /* Content */,
+				C10000010000000000000008 /* Assets */,
 				B10000010000000000000010 /* Info.plist */,
 				B10000010000000000000011 /* MilsimGame-Bridging-Header.h */,
 			);
@@ -98,6 +103,7 @@
 			children = (
 				B10000010000000000000005 /* GameMetalView.swift */,
 				B10000010000000000000006 /* GameRenderer.swift */,
+				B10000010000000000000017 /* PrimaryAssetLibrary.swift */,
 				B10000010000000000000007 /* Shaders.metal */,
 			);
 			path = Rendering;
@@ -120,6 +126,14 @@
 				B10000010000000000000016 /* MissionScripts.json */,
 			);
 			path = Content;
+			sourceTree = "<group>";
+		};
+		C10000010000000000000008 /* Assets */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000018 /* PrimaryAssets */,
+			);
+			path = Assets;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -183,6 +197,7 @@
 				A10000010000000000000009 /* ItemDefinitions.json in Resources */,
 				A10000010000000000000010 /* MissionLootTables.json in Resources */,
 				A10000010000000000000011 /* MissionScripts.json in Resources */,
+				A10000010000000000000013 /* PrimaryAssets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -199,6 +214,7 @@
 				A10000010000000000000004 /* HUDOverlayView.swift in Sources */,
 				A10000010000000000000005 /* GameMetalView.swift in Sources */,
 				A10000010000000000000006 /* GameRenderer.swift in Sources */,
+				A10000010000000000000012 /* PrimaryAssetLibrary.swift in Sources */,
 				A10000010000000000000007 /* Shaders.metal in Sources */,
 				A10000010000000000000008 /* engine.c in Sources */,
 			);
