@@ -59,4 +59,4 @@ The current build is a playable tactical slice with completed Cycle 2 environmen
 - `MilsimGame/Content`: bundled JSON item definitions, loot tables, and mission scripts
 - `MilsimGame/Rendering`: Metal view, renderer, and shaders
 - `MilsimGame/UI`: SwiftUI game interface
-- `plan.md`: researched multi-cycle roadmap toward a deeper ARMA-like milsim
+- `plan.md`: researched roadmap spanning Cycle 0 through Cycle 23 toward a deeper ARMA-like milsim

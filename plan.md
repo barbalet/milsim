@@ -225,6 +225,119 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 - Formalize test plans for simulation, save/load, map logic, and multiplayer regression.
 - Exit criteria: the game is ready for closed external testing and a longer content roadmap.
 
+## Development Cycle Update
+
+- The roadmap now extends from Cycle 0 through Cycle 23.
+- Cycles 9 through 23 add 15 more development cycles that keep the near-term tutorial, AI, logistics, shell, persistence, audio, input, and editor work inside a shorter runway.
+- The shortened runway keeps the highest-priority requested work in the numbered plan while pushing some late hardening and release-prep work back into the broader backlog.
+- With Cycle 4 already in progress, the active remaining plan now spans 20 cycles through Cycle 23.
+- Later hardening on mission-editor depth, first-person final polish, packaged-build hardening, and closed-test triage is deferred to the backlog unless it is pulled forward again.
+
+## Cycle 9: Closed Tutorial Operation Foundation
+
+- Build a guided onboarding operation with scripted insertion, movement, interaction, firing, reload, treatment, and extraction beats.
+- Add tutorial progression state, contextual step gating, and recovery logic when the player breaks sequence or misses the intended lesson.
+- Reuse the live mission scripting model instead of building a one-off tutorial-only rules path.
+- Exit criteria: a first-time player can complete a guided operation without leaving the app for instructions.
+
+## Cycle 10: Closed Tutorial Operation Polish
+
+- Add tutorial-specific mission copy, optional helper callouts, checkpoints, fail-soft resets, and a skip/replay path.
+- Tune the tutorial for command-shell windows, first-person view, and overhead fallback so onboarding works across the full current presentation stack.
+- Add tutorial completion tracking so later systems can unlock or recommend it appropriately.
+- Exit criteria: the tutorial is stable enough to serve as the default first operation for closed testers.
+
+## Cycle 11: Enemy AI Cover and Search Foundation
+
+- Rework hostile behavior around cover evaluation, move-to-cover decisions, and contact-angle awareness instead of simple direct pursuit.
+- Expand search behavior from last-known-position probes into short area sweeps, spacing, and suspicion decay rules.
+- Add debug hooks so AI cover scores, search anchors, and intent transitions can be inspected during tuning.
+- Exit criteria: enemies consistently choose stronger nearby cover and search more credibly after losing sight of the player.
+
+## Cycle 12: Enemy AI Cover and Search Hardening
+
+- Tune multi-enemy coordination around cover sharing, leapfrogging, flank hesitation, and fallback handoff when pressure shifts.
+- Improve search readability through radio text, tactical-map labels, and clearer combat-state transitions.
+- Add regression cases for hostile cover selection, stalled search loops, and broken reengagement timing.
+- Exit criteria: hostile cover/search behavior feels materially stronger in live missions and survives repeated mission seeds without obvious breakdowns.
+
+## Cycle 13: Vehicle and Logistics Mini-Loop Foundation
+
+- Introduce a first ground-vehicle slice with boarding, simple driving, cargo inventory, and limited squad transport.
+- Add a small logistics loop around ammo or medical resupply so vehicles matter beyond movement speed alone.
+- Author one mission seed that uses the vehicle loop for insertion, resupply, or extraction pressure.
+- Exit criteria: the prototype supports one meaningful drivable logistics interaction inside a live operation.
+
+## Cycle 14: Vehicle and Logistics Mini-Loop Hardening
+
+- Add fuel, damage, field repair, or depot interaction to make the mini-loop feel like systems gameplay rather than a one-button transport feature.
+- Tune camera, controls, pathing constraints, and AI mount/dismount behavior so the vehicle loop is usable under combat pressure.
+- Improve vehicle HUD and mission feedback so cargo state and logistics consequences stay readable.
+- Exit criteria: the first vehicle/logistics loop can anchor a complete mission beat without collapsing into edge-case friction.
+
+## Cycle 15: Scenario Picker Foundation
+
+- Add a scenario picker UI that lists mission seeds, authored scenarios, archive context, and recommended modes such as tutorial or free operation.
+- Separate scenario selection from immediate mission boot so the player can preview core metadata before committing.
+- Reuse bundled mission script data so new scenarios can appear in the picker without code changes.
+- Exit criteria: players can deliberately launch a chosen scenario instead of only cycling or accepting the current default flow.
+
+## Cycle 16: Scenario Picker Hardening
+
+- Add scenario filters, preview text, difficulty/complexity tags, and last-played or archive-aware resume cues.
+- Tune picker interaction for detached macOS panels, keyboard navigation, and gamepad-style future expansion.
+- Add graceful handling for missing data, incompatible saves, or locked scenarios tied to onboarding flow.
+- Exit criteria: the scenario picker feels like a durable shell feature rather than a debug launcher.
+
+## Cycle 17: Save and Load Hardening Foundation
+
+- Audit the current archive format for missing state, fragile assumptions, and migration risk as more systems enter the sandbox.
+- Add explicit versioning, validation, and safer load failure handling around mission branches, fireteam state, and presentation-facing metadata.
+- Expand save coverage tests around mission progress, inventory, AI state, and scenario selection context.
+- Exit criteria: saves either restore correctly or fail safely with actionable feedback instead of silently corrupting play state.
+
+## Cycle 18: Save and Load Hardening Hardening
+
+- Add migration paths for older archives, better slot metadata, and recovery flows for partial or incompatible saves.
+- Stress-test rapid save/load across multiple archive slots and mission branches to catch persistence regressions early.
+- Fold save/load diagnostics into debrief or shell messaging so users understand what happened when restores fail.
+- Exit criteria: persistence is reliable enough to support more ambitious authored scenarios and longer external test sessions.
+
+## Cycle 19: Production Audio Foundation
+
+- Add a first production audio pass for gun reports, footsteps, gear handling, UI cues, and a battlefield ambience bed.
+- Build a simple bus and mix structure so weapon, UI, voice, ambience, and future vehicle audio can be balanced independently.
+- Wire surface-aware footsteps and distance-aware weapon playback into the live simulation.
+- Exit criteria: the prototype gains a cohesive sound layer that materially improves tactical readability and atmosphere.
+
+## Cycle 20: Production Audio Hardening
+
+- Tune dynamic range, indoor/outdoor feel, suppression cracks, and first-person versus overhead mix balance.
+- Add placeholder or authored radio callouts for tutorial, AI reporting, and mission-state emphasis where silence currently hurts clarity.
+- Add audio settings hooks so later options work can expose bus volume and accessibility controls cleanly.
+- Exit criteria: audio supports longer play sessions without clipping, masking, or prototype-level silence gaps.
+
+## Cycle 21: Keybinding and Options Foundation
+
+- Build an options screen for graphics, audio, mouse sensitivity, fullscreen behavior, and core presentation toggles.
+- Add a first keybinding system with editable bindings for movement, stance, interaction, weapons, map, and command-layer actions.
+- Persist option and binding changes outside transient mission state so they survive relaunches.
+- Exit criteria: core controls and settings no longer require code edits or hard-coded assumptions.
+
+## Cycle 22: Keybinding and Options Hardening
+
+- Add conflict detection, reset-to-defaults, binding import/export or profile support, and clearer accessibility-facing descriptions.
+- Tune focus behavior between the game window and detached panels so rebinding and settings changes do not strand player input.
+- Add validation for invalid bindings, unsupported keys, and full-screen/window-state regressions.
+- Exit criteria: the options stack feels production-ready for closed testers rather than a developer-only utility.
+
+## Cycle 23: Mission Editor-Lite Foundation
+
+- Build a lightweight authoring tool for objective placement, extraction zones, patrol anchors, loot nodes, and mission metadata.
+- Keep the editor data-driven and schema-aligned with the existing bundled mission script format.
+- Add a quick author-preview loop so simple scenario edits can be tested without manual JSON surgery.
+- Exit criteria: designers can create or adjust a small operation without touching engine code directly.
+
 ## Professional Polish Track
 
 1. Replace the remaining projection-style first-person presentation with a fully realized 3D combat view: cleaner terrain silhouettes, better cover edges, proper world meshes, and exact sight/laser convergence.
@@ -248,6 +361,6 @@ Build a macOS military-simulation sandbox inspired by the ARMA family: large tac
 
 ## Immediate Next Steps
 
-- Deepen the new Cycle 4 command-layer pass with tighter order language, rules of engagement, breach/flank behaviors, and clearer command feedback now that the first friendly fireteam loop is in place.
-- Carry the new visual direction into authored meshes, decals, impact materials, and eventually audio so the scene polish keeps compounding instead of stalling at palette, fog, and scripted mission copy.
-- Deepen the new campaign shell with slot metadata migration, longer branching chains, and debrief rewards once the first command-layer pass settles the broader mission structure.
+- Finish the current Cycle 4 command-layer follow-up with stronger order language, rules of engagement, breach/flank behavior, and clearer feedback so Cycles 9 and 11 are built on sturdier squad combat.
+- Start Cycle 9 tutorial scripting and Cycle 15 scenario-picker data planning against the same mission metadata model so onboarding and operation selection do not fork the content pipeline.
+- Begin the Cycle 17 persistence audit early, because save/load hardening now underpins the tutorial flow, scenario picker, mission editor-lite, packaged builds, and any future closed-test distribution.
